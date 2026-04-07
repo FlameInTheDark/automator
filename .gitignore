@@ -1,0 +1,38 @@
+# Binaries
+/automator
+/automator.exe
+/server
+/server.exe
+*.test
+*.out
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend dependencies and generated assets
+/web/node_modules/
+/internal/api/web/dist/
+/web/dist/
+
+# Coverage and test output
+coverage.out
+.coverprofile
+/test-results/
+
+# Logs and temp files
+*.log
+*.tmp
+tmp/
+
+# Environment overrides
+.env
+.env.*
+!.env.example
+
+# Editor / OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

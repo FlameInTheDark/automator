@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: #0a0e14;
+  color: #e6edf3;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0e14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2d3d;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2dd4bf;
+}
+
+.react-flow__controls-button {
+  background: #131b24 !important;
+  border-color: #1e2d3d !important;
+  color: #e6edf3 !important;
+}
+.react-flow__controls-button:hover {
+  background: #1a2332 !important;
+  border-color: #2dd4bf !important;
+}
+.react-flow__minimap {
+  background: #131b24 !important;
+  border: 1px solid #1e2d3d !important;
+  border-radius: 8px !important;
+}
+.react-flow__panel {
+  margin: 12px !important;
+}
+.react-flow__background {
+  background-color: #0a0e14 !important;
+}
+.react-flow__node {
+  cursor: grab;
+}
+.react-flow__node:active {
+  cursor: grabbing;
+}
+.react-flow__edge-path {
+  stroke: #1e2d3d;
+  stroke-width: 2;
+}
+.react-flow__edge-path:hover {
+  stroke: #2dd4bf;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #10b981;
+  stroke-width: 2.5;
+}
+.react-flow__handle {
+  background: #1e2d3d;
+  border: 2px solid #2dd4bf;
+  width: 10px;
+  height: 10px;
+}
+.react-flow__handle:hover {
+  background: #10b981;
+}
+.react-flow__handle-connecting {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+.react-flow__handle-valid {
+  background: #10b981;
+  border-color: #10b981;
+}
+
+.react-flow__attribution {
+  display: none !important;
+}
+
+.chat-markdown {
+  line-height: 1.6;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown blockquote,
+.chat-markdown pre,
+.chat-markdown table {
+  margin: 0.65rem 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.2rem;
+}
+
+.chat-markdown a {
+  color: #5eead4;
+  text-decoration: underline;
+}
+
+.chat-markdown code {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 0.92em;
+  background: rgba(19, 27, 36, 0.95);
+  border: 1px solid rgba(30, 45, 61, 0.9);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+}
+
+.chat-markdown pre {
+  overflow-x: auto;
+  background: rgba(19, 27, 36, 0.98);
+  border: 1px solid rgba(30, 45, 61, 0.95);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+
+.chat-markdown pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid #2dd4bf;
+  padding-left: 0.9rem;
+  color: #9fb0bf;
+}
+
+.chat-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid rgba(30, 45, 61, 0.95);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.chat-markdown th {
+  background: rgba(19, 27, 36, 0.98);
+}

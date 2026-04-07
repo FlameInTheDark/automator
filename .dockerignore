@@ -1,0 +1,13 @@
+.git
+.idea
+automator
+automator.exe
+automator.exe~
+server.exe
+automator.db
+automator-smoketest.db
+smoke.out
+smoke.err
+web/node_modules
+web/dist
+internal/api/web/dist

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  automator:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - automator-data:/data
+    environment:
+      - AUTOMATOR_PORT=8080
+      - AUTOMATOR_DB_PATH=/data/automator.db
+    restart: unless-stopped
+
+volumes:
+  automator-data:
