@@ -96,14 +96,13 @@ This repository is set up for a two-stage GitHub Actions release flow:
 1. `Semantic Release` runs on pushes to `main` or `master`
 2. conventional commits are analyzed to create the next GitHub release and changelog
 3. after a release is published, semantic-release dispatches `Release Build`
-4. native binaries are built for Windows, Linux, and macOS
+4. native binaries are built for Windows, Linux, and macOS Apple Silicon, then uploaded to the GitHub release
 5. a container image is built and pushed to GHCR
 
 Release assets are expected to include downloadable binaries for:
 
 - Windows (`.zip`)
 - Linux (`.tar.gz`)
-- macOS Intel (`.tar.gz`)
 - macOS Apple Silicon (`.tar.gz`)
 
 ## Notes

@@ -101,12 +101,6 @@ jobs:
             goarch: amd64
             binary_name: automator.exe
             archive_suffix: windows_amd64.zip
-          - name: macos-amd64
-            runner: macos-13
-            goos: darwin
-            goarch: amd64
-            binary_name: automator
-            archive_suffix: darwin_amd64.tar.gz
           - name: macos-arm64
             runner: macos-14
             goos: darwin
@@ -174,6 +168,13 @@ jobs:
           path: dist/automator_${{ needs.prepare.outputs.tag_name }}_${{ matrix.archive_suffix }}
           if-no-files-found: error
 
+      - name: Upload binary to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          files: dist/automator_${{ needs.prepare.outputs.tag_name }}_${{ matrix.archive_suffix }}
+          overwrite_files: true
+
   container:
     name: Build and push container
     needs: prepare
@@ -212,11 +213,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   publish-assets:
-    name: Upload release assets
+    name: Upload checksums
     needs:
       - prepare
       - binaries
-      - container
     runs-on: ubuntu-latest
 
     steps:
@@ -236,5 +236,5 @@ jobs:
         with:
           tag_name: ${{ needs.prepare.outputs.tag_name }}
           files: |
-            release-assets/*
+            release-assets/SHA256SUMS.txt
           overwrite_files: true
