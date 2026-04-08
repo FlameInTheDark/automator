@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Server, Brain, Plus, Trash2, Edit2, MessageSquare, Power } from 'lucide-react'
+import { Server, Shield, Brain, Plus, Trash2, Edit2, MessageSquare, Power, Users } from 'lucide-react'
 import { api } from '../api/client'
 import { Card, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -8,9 +8,11 @@ import Input from '../components/ui/Input'
 import { Label, Checkbox, Textarea } from '../components/ui/Form'
 import Badge from '../components/ui/Badge'
 import Skeleton from '../components/ui/Skeleton'
+import KubernetesClusterSettings from '../components/Settings/KubernetesClusterSettings'
 import { useUIStore } from '../store/ui'
 import { cn } from '../lib/utils'
-import type { Channel, Cluster, LLMProvider } from '../types'
+import { AUTH_SESSION_QUERY_KEY, useAuthSession } from '../lib/auth'
+import type { AuthSession, Channel, Cluster, LLMProvider, User } from '../types'
 
 type ClusterFormState = {
   name: string
@@ -36,6 +38,17 @@ type ChannelFormState = {
   bot_token: string
   welcome_message: string
   enabled: boolean
+}
+
+type UserFormState = {
+  username: string
+  password: string
+}
+
+type PasswordChangeFormState = {
+  current_password: string
+  new_password: string
+  confirm_password: string
 }
 
 function getDefaultClusterForm(): ClusterFormState {
@@ -94,6 +107,21 @@ function getDefaultChannelForm(): ChannelFormState {
   }
 }
 
+function getDefaultUserForm(): UserFormState {
+  return {
+    username: '',
+    password: '',
+  }
+}
+
+function getDefaultPasswordChangeForm(): PasswordChangeFormState {
+  return {
+    current_password: '',
+    new_password: '',
+    confirm_password: '',
+  }
+}
+
 function getChannelConnectURL(): string | undefined {
   if (typeof window === 'undefined' || !window.location?.origin) {
     return undefined
@@ -145,7 +173,7 @@ function channelToForm(channel: Channel): ChannelFormState {
 }
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<'clusters' | 'channels' | 'llm'>('clusters')
+  const [activeTab, setActiveTab] = useState<'clusters' | 'kubernetes' | 'channels' | 'llm' | 'users'>('clusters')
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -157,8 +185,10 @@ export default function Settings() {
       <div className="flex gap-1 p-1 bg-bg-input rounded-lg border border-border mb-6 w-fit">
         {[
           { id: 'clusters' as const, label: 'Proxmox Clusters', icon: Server },
+          { id: 'kubernetes' as const, label: 'Kubernetes Clusters', icon: Shield },
           { id: 'channels' as const, label: 'Channels', icon: MessageSquare },
           { id: 'llm' as const, label: 'LLM Providers', icon: Brain },
+          { id: 'users' as const, label: 'Users', icon: Users },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -177,8 +207,233 @@ export default function Settings() {
       </div>
 
       {activeTab === 'clusters' && <ClusterSettings />}
+      {activeTab === 'kubernetes' && <KubernetesClusterSettings />}
       {activeTab === 'channels' && <ChannelSettings />}
       {activeTab === 'llm' && <LLMSettings />}
+      {activeTab === 'users' && <UserSettings />}
+    </div>
+  )
+}
+
+function UserSettings() {
+  const queryClient = useQueryClient()
+  const { addToast } = useUIStore()
+  const sessionQuery = useAuthSession()
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState<UserFormState>(getDefaultUserForm())
+  const [passwordForm, setPasswordForm] = useState<PasswordChangeFormState>(getDefaultPasswordChangeForm())
+
+  const { data: users, isLoading } = useQuery<User[]>({
+    queryKey: ['users'],
+    queryFn: () => api.users.list(),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: () => api.users.create(form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      setForm(getDefaultUserForm())
+      setShowForm(false)
+      addToast({ type: 'success', title: 'User created' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', title: 'Failed to create user', message: err.message })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.users.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', title: 'User removed' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', title: 'Failed to remove user', message: err.message })
+    },
+  })
+
+  const changePasswordMutation = useMutation({
+    mutationFn: () => api.users.changePassword({
+      current_password: passwordForm.current_password,
+      new_password: passwordForm.new_password,
+    }),
+    onSuccess: (session) => {
+      queryClient.setQueryData<AuthSession | null>(AUTH_SESSION_QUERY_KEY, session)
+      setPasswordForm(getDefaultPasswordChangeForm())
+      addToast({ type: 'success', title: 'Password updated' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', title: 'Failed to update password', message: err.message })
+    },
+  })
+
+  function resetForm() {
+    setForm(getDefaultUserForm())
+    setShowForm(false)
+  }
+
+  function handlePasswordSubmit() {
+    if (!passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password) {
+      addToast({ type: 'warning', title: 'All password fields are required' })
+      return
+    }
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      addToast({ type: 'warning', title: 'New passwords do not match' })
+      return
+    }
+    if (passwordForm.current_password === passwordForm.new_password) {
+      addToast({ type: 'warning', title: 'Choose a different new password' })
+      return
+    }
+
+    changePasswordMutation.mutate()
+  }
+
+  function handleSubmit() {
+    if (!form.username.trim() || !form.password) {
+      addToast({ type: 'warning', title: 'Username and password are required' })
+      return
+    }
+
+    createMutation.mutate()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text">Users</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Manage users here, and update your own password without any public registration flow.
+          </p>
+        </div>
+        <Button onClick={showForm ? resetForm : () => setShowForm(true)}>
+          <Plus className="w-4 h-4" />
+          {showForm ? 'Close' : 'Add User'}
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="space-y-4 pt-6">
+          <div>
+            <h3 className="text-base font-semibold text-text">Change Your Password</h3>
+            <p className="mt-1 text-sm text-text-muted">
+              {sessionQuery.data?.username
+                ? `Signed in as ${sessionQuery.data.username}.`
+                : 'Update the password for your current account.'}
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <Label>Current Password</Label>
+              <Input
+                type="password"
+                value={passwordForm.current_password}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, current_password: event.target.value }))}
+                placeholder="Current password"
+              />
+            </div>
+            <div>
+              <Label>New Password</Label>
+              <Input
+                type="password"
+                value={passwordForm.new_password}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, new_password: event.target.value }))}
+                placeholder="New password"
+              />
+            </div>
+            <div>
+              <Label>Confirm New Password</Label>
+              <Input
+                type="password"
+                value={passwordForm.confirm_password}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, confirm_password: event.target.value }))}
+                placeholder="Repeat the new password"
+              />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button onClick={handlePasswordSubmit} loading={changePasswordMutation.isPending}>
+              Update Password
+            </Button>
+            <Button variant="secondary" onClick={() => setPasswordForm(getDefaultPasswordChangeForm())}>
+              Reset
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {showForm && (
+        <Card>
+          <CardContent className="space-y-4 pt-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label>Username</Label>
+                <Input
+                  value={form.username}
+                  onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+                  placeholder="operator"
+                />
+              </div>
+              <div>
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  value={form.password}
+                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  placeholder="Choose a password"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Button onClick={handleSubmit} loading={createMutation.isPending}>
+                Create User
+              </Button>
+              <Button variant="secondary" onClick={resetForm}>
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="space-y-4">
+        {isLoading && (
+          <>
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </>
+        )}
+
+        {!isLoading && users?.map((user) => {
+          const isCurrentUser = sessionQuery.data?.username === user.username
+          return (
+            <Card key={user.id}>
+              <CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate text-base font-semibold text-text">{user.username}</h3>
+                    {isCurrentUser && <Badge variant="info">Current</Badge>}
+                    {user.username === 'admin' && <Badge variant="success">Default</Badge>}
+                  </div>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Created {new Date(user.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <Button
+                  variant="danger"
+                  onClick={() => deleteMutation.mutate(user.id)}
+                  disabled={deleteMutation.isPending || isCurrentUser}
+                  title={isCurrentUser ? 'You cannot delete your own account' : 'Delete user'}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete
+                </Button>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -293,16 +548,17 @@ function ClusterSettings() {
 
   return (
     <div>
-      <div className="mb-4 flex gap-2">
-        <Button onClick={startCreate}>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text">Proxmox Clusters</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Store the Proxmox connections used by your infrastructure nodes and tools.
+          </p>
+        </div>
+        <Button onClick={showForm ? resetForm : startCreate}>
           <Plus className="w-4 h-4" />
-          {showForm ? 'New Cluster' : 'Add Cluster'}
+          {showForm ? 'Close' : 'Add Cluster'}
         </Button>
-        {showForm && (
-          <Button type="button" variant="ghost" onClick={resetForm}>
-            Cancel
-          </Button>
-        )}
       </div>
 
       {showForm && (
@@ -574,16 +830,17 @@ function ChannelSettings() {
 
   return (
     <div>
-      <div className="mb-4 flex gap-2">
-        <Button onClick={startCreate}>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text">Channels</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Manage Telegram and Discord bot connections for message-based automation.
+          </p>
+        </div>
+        <Button onClick={showForm ? resetForm : startCreate}>
           <Plus className="w-4 h-4" />
-          {showForm ? 'New Channel' : 'Add Channel'}
+          {showForm ? 'Close' : 'Add Channel'}
         </Button>
-        {showForm && (
-          <Button type="button" variant="ghost" onClick={resetForm}>
-            Cancel
-          </Button>
-        )}
       </div>
 
       {showForm && (
@@ -844,16 +1101,17 @@ function LLMSettings() {
 
   return (
     <div>
-      <div className="mb-4 flex gap-2">
-        <Button onClick={startCreate}>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text">LLM Providers</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Configure the AI providers available to prompt, chat, and agent nodes.
+          </p>
+        </div>
+        <Button onClick={showForm ? resetForm : startCreate}>
           <Plus className="w-4 h-4" />
-          {showForm ? 'New Provider' : 'Add Provider'}
+          {showForm ? 'Close' : 'Add Provider'}
         </Button>
-        {showForm && (
-          <Button type="button" variant="ghost" onClick={resetForm}>
-            Cancel
-          </Button>
-        )}
       </div>
 
       {showForm && (

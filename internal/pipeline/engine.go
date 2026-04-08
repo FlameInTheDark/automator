@@ -160,7 +160,18 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 
 		executor, err := e.registry.Get(nodeType)
 		if err != nil {
-			e.recordNodeRun(state, currentID, string(nodeType), input, &node.NodeResult{Error: err}, startedAt, time.Now(), observer)
+			result := &node.NodeResult{Error: err}
+			continued := shouldContinueNodeError(nodeType, configData, err)
+			if continued {
+				result = buildContinuedErrorResult(currentID, nodeType, input, err)
+			}
+
+			e.recordNodeRun(state, currentID, string(nodeType), input, result, startedAt, time.Now(), observer)
+			if continued {
+				queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routingDecision{}, inDegree)
+				continue
+			}
+
 			return state, fmt.Errorf("node %s: %w", currentID, err)
 		}
 
@@ -169,7 +180,18 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 		result, err := executor.Execute(withCurrentNodeID(ctx, currentID), configData, input)
 		completedAt := time.Now()
 		if err != nil {
-			e.recordNodeRun(state, currentID, string(nodeType), input, &node.NodeResult{Error: err}, startedAt, completedAt, observer)
+			result := &node.NodeResult{Error: err}
+			continued := shouldContinueNodeError(nodeType, configData, err)
+			if continued {
+				result = buildContinuedErrorResult(currentID, nodeType, input, err)
+			}
+
+			e.recordNodeRun(state, currentID, string(nodeType), input, result, startedAt, completedAt, observer)
+			if continued {
+				queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routingDecision{}, inDegree)
+				continue
+			}
+
 			return state, fmt.Errorf("execute node %s (%s): %w", currentID, nodeType, err)
 		}
 
@@ -186,25 +208,7 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 		}
 
 		routing := e.extractRoutingDecision(result)
-		for _, edge := range adjacency[currentID] {
-			if routing.condition != nil {
-				// Skip edges that don't match the condition result
-				if !edgeMatchesCondition(edge, *routing.condition) {
-					continue
-				}
-			}
-
-			if routing.handles != nil {
-				if !edgeMatchesHandle(edge, routing.handles) {
-					continue
-				}
-			}
-
-			inDegree[edge.Target]--
-			if inDegree[edge.Target] == 0 {
-				queue = append(queue, edge.Target)
-			}
-		}
+		queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routing, inDegree)
 	}
 
 	return state, nil
@@ -365,7 +369,7 @@ func (e *Engine) buildInitialQueue(ctx context.Context, nodeMap map[string]FlowN
 
 		flowNode := nodeMap[id]
 		nodeType, config := decodeNodeTypeAndConfig(flowNode)
-		if isToolNodeType(nodeType) {
+		if isToolNodeType(nodeType) || isVisualNodeType(nodeType) {
 			continue
 		}
 
@@ -387,6 +391,29 @@ func (e *Engine) buildInitialQueue(ctx context.Context, nodeMap map[string]FlowN
 	}
 
 	return rootIDs
+}
+
+func (e *Engine) enqueueOutgoingEdges(queue []string, edges []FlowEdge, routing routingDecision, inDegree map[string]int) []string {
+	for _, edge := range edges {
+		if routing.condition != nil {
+			if !edgeMatchesCondition(edge, *routing.condition) {
+				continue
+			}
+		}
+
+		if routing.handles != nil {
+			if !edgeMatchesHandle(edge, routing.handles) {
+				continue
+			}
+		}
+
+		inDegree[edge.Target]--
+		if inDegree[edge.Target] == 0 {
+			queue = append(queue, edge.Target)
+		}
+	}
+
+	return queue
 }
 
 func isToolEdge(edge FlowEdge) bool {

@@ -249,7 +249,7 @@ func (s *ChannelStore) decryptConfig(channel *models.Channel) error {
 		return nil
 	}
 
-	decrypted, err := s.encryptor.Decrypt(*channel.Config)
+	decrypted, err := s.encryptor.DecryptCompat(*channel.Config)
 	if err != nil {
 		return fmt.Errorf("decrypt channel config: %w", err)
 	}

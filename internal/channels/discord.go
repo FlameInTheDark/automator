@@ -87,6 +87,39 @@ func (r *discordRuntime) SendMessage(ctx context.Context, chatID string, text st
 	return payload, nil
 }
 
+func (r *discordRuntime) EditMessage(ctx context.Context, chatID string, messageID string, text string) (map[string]any, error) {
+	result, err := r.session.ChannelMessageEdit(chatID, messageID, text)
+	if err != nil {
+		return nil, fmt.Errorf("edit discord message: %w", err)
+	}
+
+	payload, err := marshalValueToMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("serialize discord response: %w", err)
+	}
+
+	return payload, nil
+}
+
+func (r *discordRuntime) ReplyMessage(ctx context.Context, chatID string, replyToMessageID string, text string) (map[string]any, error) {
+	failIfNotExists := false
+	result, err := r.session.ChannelMessageSendReply(chatID, text, &discordgo.MessageReference{
+		MessageID:       replyToMessageID,
+		ChannelID:       chatID,
+		FailIfNotExists: &failIfNotExists,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reply to discord message: %w", err)
+	}
+
+	payload, err := marshalValueToMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("serialize discord response: %w", err)
+	}
+
+	return payload, nil
+}
+
 func (r *discordRuntime) Close() error {
 	var closeErr error
 	r.closeOnce.Do(func() {

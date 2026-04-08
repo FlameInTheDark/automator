@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils'
 import { 
   Zap, Clock, Webhook, Play, Square, Copy, Globe, Code,
   GitBranch, Split, Brain, ChevronDown, ChevronRight, Link, MessageSquare, Send, Trash2,
-  Bot, Workflow, List, Wrench, CornerDownLeft,
+  Bot, Workflow, List, Wrench, CornerDownLeft, RefreshCw,
 } from 'lucide-react'
 
 const iconMap: Record<string, React.ElementType> = {
@@ -26,6 +26,7 @@ const iconMap: Record<string, React.ElementType> = {
   workflow: Workflow,
   list: List,
   wrench: Wrench,
+  'refresh-cw': RefreshCw,
   'trash-2': Trash2,
   'corner-down-left': CornerDownLeft,
 }
@@ -68,7 +69,7 @@ export default function NodePalette({ onDragStart }: NodePaletteProps) {
               {isExpanded && (
                 <div className="px-2 space-y-1">
                   {category.types.map((nodeType) => {
-                    const Icon = iconMap[nodeType.icon]
+                    const Icon = iconMap[nodeType.icon] || Zap
                     return (
                       <div
                         key={nodeType.type}

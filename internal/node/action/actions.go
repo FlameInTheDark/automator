@@ -31,6 +31,8 @@ type ChannelContactStore interface {
 
 type ChannelMessageSender interface {
 	SendMessage(ctx context.Context, channel *models.Channel, chatID string, text string) (map[string]any, error)
+	ReplyMessage(ctx context.Context, channel *models.Channel, chatID string, replyToMessageID string, text string) (map[string]any, error)
+	EditMessage(ctx context.Context, channel *models.Channel, chatID string, messageID string, text string) (map[string]any, error)
 }
 
 type ChannelReplyWaiter interface {
@@ -50,6 +52,19 @@ func resolveClusterID(configClusterID string, input map[string]any) string {
 	}
 	if clusterID, ok := input["cluster_id"].(string); ok && clusterID != "" {
 		return clusterID
+	}
+	return ""
+}
+
+func resolveChannelID(configChannelID string, input map[string]any) string {
+	if value := strings.TrimSpace(configChannelID); value != "" {
+		return value
+	}
+	if value, ok := input["channel_id"].(string); ok && strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	if value, ok := input["channelId"].(string); ok && strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
 	}
 	return ""
 }
@@ -551,36 +566,14 @@ func (e *ChannelSendAction) Execute(ctx context.Context, config json.RawMessage,
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
-	if cfg.ChannelID == "" {
-		if value, ok := input["channel_id"].(string); ok {
-			cfg.ChannelID = value
-		}
-	}
-	if cfg.Message == "" {
+	cfg.ChannelID = resolveChannelID(cfg.ChannelID, input)
+	if strings.TrimSpace(cfg.Message) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
 
-	channel, err := e.Channels.GetByID(ctx, cfg.ChannelID)
+	channel, contact, recipientID, chatID, err := resolveChannelTarget(ctx, e.Channels, e.Contacts, cfg.ChannelID, cfg.Recipient, input)
 	if err != nil {
-		return nil, fmt.Errorf("load channel %s: %w", cfg.ChannelID, err)
-	}
-
-	recipientID := strings.TrimSpace(cfg.Recipient)
-	if recipientID == "" {
-		recipientID = resolveChannelRecipient(input)
-	}
-	if recipientID == "" {
-		return nil, fmt.Errorf("recipient is required")
-	}
-
-	chatID := recipientID
-	if e.Contacts != nil {
-		if contact, err := e.Contacts.GetByID(ctx, recipientID); err == nil && contact != nil {
-			if contact.ChannelID != channel.ID {
-				return nil, fmt.Errorf("contact does not belong to channel %s", channel.Name)
-			}
-			chatID = contact.ExternalChatID
-		}
+		return nil, err
 	}
 
 	result, err := e.Sender.SendMessage(ctx, channel, chatID, cfg.Message)
@@ -596,6 +589,13 @@ func (e *ChannelSendAction) Execute(ctx context.Context, config json.RawMessage,
 		"chat_id":     chatID,
 		"message":     cfg.Message,
 		"response":    result,
+	}
+	if contact != nil {
+		output["contact_id"] = contact.ID
+	}
+	if messageID := extractMessageID(result); messageID != "" {
+		output["messageId"] = messageID
+		output["message_id"] = messageID
 	}
 	data, _ := json.Marshal(output)
 	return &node.NodeResult{Output: data}, nil
@@ -626,6 +626,166 @@ func resolveChannelRecipient(input map[string]any) string {
 		return strings.TrimSpace(value)
 	}
 	return ""
+}
+
+type ChannelEditAction struct {
+	Channels ChannelStore
+	Contacts ChannelContactStore
+	Sender   ChannelMessageSender
+}
+
+type channelReplyConfig struct {
+	ChannelID        string `json:"channelId"`
+	Recipient        string `json:"recipient"`
+	ReplyToMessageID string `json:"replyToMessageId"`
+	Message          string `json:"message"`
+}
+
+type ChannelReplyAction struct {
+	Channels ChannelStore
+	Contacts ChannelContactStore
+	Sender   ChannelMessageSender
+}
+
+func (e *ChannelReplyAction) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	if e.Channels == nil || e.Sender == nil {
+		return nil, fmt.Errorf("channel replier is not configured")
+	}
+
+	var cfg channelReplyConfig
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if err := templating.RenderStrings(&cfg, input); err != nil {
+		return nil, fmt.Errorf("render config: %w", err)
+	}
+
+	cfg.ChannelID = resolveChannelID(cfg.ChannelID, input)
+	if strings.TrimSpace(cfg.Message) == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+
+	channel, contact, recipientID, chatID, err := resolveChannelTarget(ctx, e.Channels, e.Contacts, cfg.ChannelID, cfg.Recipient, input)
+	if err != nil {
+		return nil, err
+	}
+
+	replyToMessageID := resolveChannelMessageID(cfg.ReplyToMessageID, input)
+	if replyToMessageID == "" {
+		return nil, fmt.Errorf("replyToMessageId is required")
+	}
+
+	result, err := e.Sender.ReplyMessage(ctx, channel, chatID, replyToMessageID, cfg.Message)
+	if err != nil {
+		return nil, fmt.Errorf("reply to message in channel %s: %w", channel.Name, err)
+	}
+
+	output := map[string]any{
+		"status":              "replied",
+		"channelId":           channel.ID,
+		"channelName":         channel.Name,
+		"recipient":           recipientID,
+		"chat_id":             chatID,
+		"replyToMessageId":    replyToMessageID,
+		"reply_to_message_id": replyToMessageID,
+		"message":             cfg.Message,
+		"response":            result,
+	}
+	if contact != nil {
+		output["contact_id"] = contact.ID
+	}
+	if messageID := extractMessageID(result); messageID != "" {
+		output["messageId"] = messageID
+		output["message_id"] = messageID
+	}
+	data, _ := json.Marshal(output)
+	return &node.NodeResult{Output: data}, nil
+}
+
+func (e *ChannelReplyAction) Validate(config json.RawMessage) error {
+	var cfg channelReplyConfig
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	if strings.TrimSpace(cfg.ChannelID) == "" {
+		return fmt.Errorf("channelId is required")
+	}
+	if strings.TrimSpace(cfg.Message) == "" {
+		return fmt.Errorf("message is required")
+	}
+	return nil
+}
+
+type channelEditConfig struct {
+	ChannelID string `json:"channelId"`
+	Recipient string `json:"recipient"`
+	MessageID string `json:"messageId"`
+	Message   string `json:"message"`
+}
+
+func (e *ChannelEditAction) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	if e.Channels == nil || e.Sender == nil {
+		return nil, fmt.Errorf("channel editor is not configured")
+	}
+
+	var cfg channelEditConfig
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if err := templating.RenderStrings(&cfg, input); err != nil {
+		return nil, fmt.Errorf("render config: %w", err)
+	}
+
+	cfg.ChannelID = resolveChannelID(cfg.ChannelID, input)
+	if strings.TrimSpace(cfg.Message) == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+
+	channel, contact, recipientID, chatID, err := resolveChannelTarget(ctx, e.Channels, e.Contacts, cfg.ChannelID, cfg.Recipient, input)
+	if err != nil {
+		return nil, err
+	}
+
+	messageID := resolveChannelMessageID(cfg.MessageID, input)
+	if messageID == "" {
+		return nil, fmt.Errorf("messageId is required")
+	}
+
+	result, err := e.Sender.EditMessage(ctx, channel, chatID, messageID, cfg.Message)
+	if err != nil {
+		return nil, fmt.Errorf("edit message in channel %s: %w", channel.Name, err)
+	}
+
+	output := map[string]any{
+		"status":      "edited",
+		"channelId":   channel.ID,
+		"channelName": channel.Name,
+		"recipient":   recipientID,
+		"chat_id":     chatID,
+		"messageId":   messageID,
+		"message_id":  messageID,
+		"message":     cfg.Message,
+		"response":    result,
+	}
+	if contact != nil {
+		output["contact_id"] = contact.ID
+	}
+	data, _ := json.Marshal(output)
+	return &node.NodeResult{Output: data}, nil
+}
+
+func (e *ChannelEditAction) Validate(config json.RawMessage) error {
+	var cfg channelEditConfig
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	if strings.TrimSpace(cfg.ChannelID) == "" {
+		return fmt.Errorf("channelId is required")
+	}
+	if strings.TrimSpace(cfg.Message) == "" {
+		return fmt.Errorf("message is required")
+	}
+	return nil
 }
 
 type ChannelSendAndWaitAction struct {
@@ -675,7 +835,7 @@ func (e *ChannelSendAndWaitAction) Execute(ctx context.Context, config json.RawM
 		contactID = contact.ID
 	}
 
-	reply, err := e.Waiter.WaitForReply(waitCtx, channel.ID, contactID, chatID, extractSentMessageID(sendResult), timeout)
+	reply, err := e.Waiter.WaitForReply(waitCtx, channel.ID, contactID, chatID, extractMessageID(sendResult), timeout)
 	if err != nil {
 		return nil, fmt.Errorf("wait for reply on channel %s: %w", channel.Name, err)
 	}
@@ -692,6 +852,10 @@ func (e *ChannelSendAndWaitAction) Execute(ctx context.Context, config json.RawM
 	}
 	if contact != nil {
 		output["contact_id"] = contact.ID
+	}
+	if messageID := extractMessageID(sendResult); messageID != "" {
+		output["sentMessageId"] = messageID
+		output["sent_message_id"] = messageID
 	}
 	data, _ := json.Marshal(output)
 	return &node.NodeResult{Output: data}, nil
@@ -723,11 +887,7 @@ func parseChannelSendAndWaitConfig(config json.RawMessage, input map[string]any)
 		return channelSendAndWaitConfig{}, fmt.Errorf("render config: %w", err)
 	}
 
-	if strings.TrimSpace(cfg.ChannelID) == "" {
-		if value, ok := input["channel_id"].(string); ok {
-			cfg.ChannelID = value
-		}
-	}
+	cfg.ChannelID = resolveChannelID(cfg.ChannelID, input)
 	if strings.TrimSpace(cfg.Message) == "" {
 		return channelSendAndWaitConfig{}, fmt.Errorf("message is required")
 	}
@@ -749,6 +909,10 @@ func resolveChannelTarget(
 	recipient string,
 	input map[string]any,
 ) (*models.Channel, *models.ChannelContact, string, string, error) {
+	if strings.TrimSpace(channelID) == "" {
+		return nil, nil, "", "", fmt.Errorf("channelId is required")
+	}
+
 	channel, err := channelStore.GetByID(ctx, channelID)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("load channel %s: %w", channelID, err)
@@ -780,34 +944,68 @@ func resolveChannelTarget(
 	return channel, contact, recipientID, chatID, nil
 }
 
-func extractSentMessageID(payload map[string]any) string {
+func resolveChannelMessageID(configMessageID string, input map[string]any) string {
+	if value := strings.TrimSpace(configMessageID); value != "" {
+		return value
+	}
+
+	for _, key := range []string{"message_id", "messageId", "sent_message_id", "sentMessageId"} {
+		if value := stringifyChannelValue(input[key]); value != "" {
+			return value
+		}
+	}
+
+	for _, key := range []string{"response", "sent_message", "sentMessage", "message"} {
+		if value := extractMessageID(asMap(input[key])); value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+func extractMessageID(payload map[string]any) string {
 	if len(payload) == 0 {
 		return ""
 	}
 
 	for _, key := range []string{"message_id", "id"} {
-		value, ok := payload[key]
-		if !ok {
-			continue
+		if value := stringifyChannelValue(payload[key]); value != "" {
+			return value
 		}
-		switch typed := value.(type) {
-		case string:
-			if strings.TrimSpace(typed) != "" {
-				return strings.TrimSpace(typed)
-			}
-		case float64:
-			if typed != 0 {
-				return fmt.Sprintf("%.0f", typed)
-			}
-		case int:
-			if typed != 0 {
-				return fmt.Sprintf("%d", typed)
-			}
-		case int64:
-			if typed != 0 {
-				return fmt.Sprintf("%d", typed)
-			}
+	}
+
+	return ""
+}
+
+func asMap(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	return nil
+}
+
+func stringifyChannelValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed != 0 {
+			return fmt.Sprintf("%.0f", typed)
 		}
+	case int:
+		if typed != 0 {
+			return fmt.Sprintf("%d", typed)
+		}
+	case int64:
+		if typed != 0 {
+			return fmt.Sprintf("%d", typed)
+		}
+	case json.Number:
+		return strings.TrimSpace(typed.String())
 	}
 
 	return ""

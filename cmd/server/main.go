@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/FlameInTheDark/automator/internal/api"
+	"github.com/FlameInTheDark/automator/internal/auth"
 	"github.com/FlameInTheDark/automator/internal/channels"
 	"github.com/FlameInTheDark/automator/internal/config"
 	"github.com/FlameInTheDark/automator/internal/crypto"
@@ -38,26 +39,38 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			log.Printf("failed to close database: %v", err)
+		}
+	}()
 
 	if err := db.Migrate(database); err != nil {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
-	var encryptor *crypto.Encryptor
-	if cfg.EncryptionKey != "" {
-		encryptor, err = crypto.NewEncryptor(cfg.EncryptionKey)
-		if err != nil {
-			log.Fatalf("failed to initialize encryptor: %v", err)
-		}
+	appConfigStore := query.NewAppConfigStore(database.DB)
+	encryptionKey, err := appConfigStore.EnsureEncryptionKey(context.Background(), cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("failed to initialize app encryption key: %v", err)
+	}
+
+	encryptor, err := crypto.NewEncryptor(encryptionKey)
+	if err != nil {
+		log.Fatalf("failed to initialize encryptor: %v", err)
 	}
 
 	clusterStore := query.NewClusterStore(database.DB, encryptor)
+	kubernetesClusterStore := query.NewKubernetesClusterStore(database.DB, encryptor)
 	llmProviderStore := query.NewLLMProviderStore(database.DB, encryptor)
 	channelStore := query.NewChannelStore(database.DB, encryptor)
 	channelContactStore := query.NewChannelContactStore(database.DB)
+	userStore := query.NewUserStore(database.DB, encryptor)
 	pipelineStore := query.NewPipelineStore(database.DB)
 	executionStore := query.NewExecutionStore(database.DB)
+	if err := userStore.EnsureDefaultUser(context.Background(), cfg.Auth.Username, cfg.Auth.Password); err != nil {
+		log.Fatalf("failed to ensure default user: %v", err)
+	}
 	workingDir, err := os.Getwd()
 	if err != nil {
 		log.Printf("failed to resolve working directory: %v", err)
@@ -129,9 +142,31 @@ func main() {
 	registry.Register(node.TypeActionVMStart, &action.VMStartAction{Clusters: clusterStore})
 	registry.Register(node.TypeActionVMStop, &action.VMStopAction{Clusters: clusterStore})
 	registry.Register(node.TypeActionVMClone, &action.VMCloneAction{Clusters: clusterStore})
+	registry.Register(node.TypeActionKubernetesAPIResources, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationAPIResources))
+	registry.Register(node.TypeActionKubernetesListResources, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationListResources))
+	registry.Register(node.TypeActionKubernetesGetResource, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationGetResource))
+	registry.Register(node.TypeActionKubernetesApplyManifest, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationApplyManifest))
+	registry.Register(node.TypeActionKubernetesPatchResource, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationPatchResource))
+	registry.Register(node.TypeActionKubernetesDeleteResource, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationDeleteResource))
+	registry.Register(node.TypeActionKubernetesScaleResource, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationScaleResource))
+	registry.Register(node.TypeActionKubernetesRolloutRestart, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationRolloutRestart))
+	registry.Register(node.TypeActionKubernetesRolloutStatus, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationRolloutStatus))
+	registry.Register(node.TypeActionKubernetesPodLogs, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationPodLogs))
+	registry.Register(node.TypeActionKubernetesPodExec, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationPodExec))
+	registry.Register(node.TypeActionKubernetesEvents, action.NewKubernetesActionNode(kubernetesClusterStore, action.KubernetesOperationEvents))
 	registry.Register(node.TypeActionHTTP, &action.HTTPAction{})
 	registry.Register(node.TypeActionShell, &action.ShellCommandAction{Runner: shellRunner})
 	registry.Register(node.TypeActionChannelSend, &action.ChannelSendAction{
+		Channels: channelStore,
+		Contacts: channelContactStore,
+		Sender:   channelService,
+	})
+	registry.Register(node.TypeActionChannelReply, &action.ChannelReplyAction{
+		Channels: channelStore,
+		Contacts: channelContactStore,
+		Sender:   channelService,
+	})
+	registry.Register(node.TypeActionChannelEdit, &action.ChannelEditAction{
 		Channels: channelStore,
 		Contacts: channelContactStore,
 		Sender:   channelService,
@@ -142,6 +177,7 @@ func main() {
 		Sender:   channelService,
 		Waiter:   channelService,
 	})
+	registry.Register(node.TypeActionGetPipeline, &action.GetPipelineAction{Pipelines: pipelineStore})
 	registry.Register(node.TypeLogicReturn, &logic.ReturnNode{})
 	registry.Register(node.TypeLogicCondition, &logic.ConditionNode{})
 	registry.Register(node.TypeLogicSwitch, &logic.SwitchNode{})
@@ -179,6 +215,18 @@ func main() {
 	registry.Register(node.TypeToolVMStart, &action.VMStartToolNode{Clusters: clusterStore})
 	registry.Register(node.TypeToolVMStop, &action.VMStopToolNode{Clusters: clusterStore})
 	registry.Register(node.TypeToolVMClone, &action.VMCloneToolNode{Clusters: clusterStore})
+	registry.Register(node.TypeToolKubernetesAPIResources, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationAPIResources))
+	registry.Register(node.TypeToolKubernetesListResources, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationListResources))
+	registry.Register(node.TypeToolKubernetesGetResource, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationGetResource))
+	registry.Register(node.TypeToolKubernetesApplyManifest, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationApplyManifest))
+	registry.Register(node.TypeToolKubernetesPatchResource, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationPatchResource))
+	registry.Register(node.TypeToolKubernetesDeleteResource, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationDeleteResource))
+	registry.Register(node.TypeToolKubernetesScaleResource, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationScaleResource))
+	registry.Register(node.TypeToolKubernetesRolloutRestart, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationRolloutRestart))
+	registry.Register(node.TypeToolKubernetesRolloutStatus, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationRolloutStatus))
+	registry.Register(node.TypeToolKubernetesPodLogs, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationPodLogs))
+	registry.Register(node.TypeToolKubernetesPodExec, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationPodExec))
+	registry.Register(node.TypeToolKubernetesEvents, action.NewKubernetesToolNode(kubernetesClusterStore, action.KubernetesOperationEvents))
 	registry.Register(node.TypeToolHTTP, &action.HTTPToolNode{})
 	registry.Register(node.TypeToolShell, &action.ShellCommandToolNode{Runner: shellRunner})
 	registry.Register(node.TypeToolChannelWait, &action.ChannelSendAndWaitToolNode{
@@ -189,6 +237,7 @@ func main() {
 	})
 	registry.Register(node.TypeActionRunPipeline, &action.RunPipelineAction{Runner: pipelineInvoker})
 	registry.Register(node.TypeToolListPipelines, &action.PipelineListToolNode{Pipelines: pipelineStore})
+	registry.Register(node.TypeToolGetPipeline, &action.PipelineGetToolNode{Pipelines: pipelineStore})
 	registry.Register(node.TypeToolCreatePipeline, &action.PipelineCreateToolNode{Manager: pipelineManager})
 	registry.Register(node.TypeToolUpdatePipeline, &action.PipelineUpdateToolNode{Manager: pipelineManager})
 	registry.Register(node.TypeToolDeletePipeline, &action.PipelineDeleteToolNode{Manager: pipelineManager})
@@ -204,15 +253,21 @@ func main() {
 	}
 	defer channelService.Stop()
 
+	authService := auth.NewService(userStore, auth.Config{
+		SessionTTL: cfg.Auth.SessionTTL,
+		CookieName: cfg.Auth.CookieName,
+	})
+
 	app := api.New(api.Config{
 		DB:              database,
 		Scheduler:       cronScheduler,
 		ChannelService:  channelService,
-		EncryptionKey:   cfg.EncryptionKey,
+		EncryptionKey:   encryptionKey,
 		ExecutionRunner: executionRunner,
 		WSHub:           wsHub,
 		SkillStore:      skillStore,
 		ShellRunner:     shellRunner,
+		AuthService:     authService,
 	})
 
 	go func() {

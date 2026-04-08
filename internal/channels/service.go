@@ -23,6 +23,8 @@ type MessageDispatch func(ctx context.Context, event trigger.ChannelEvent) error
 type channelRuntime interface {
 	Run(ctx context.Context) error
 	SendMessage(ctx context.Context, chatID string, text string, buttonURL string) (map[string]any, error)
+	ReplyMessage(ctx context.Context, chatID string, replyToMessageID string, text string) (map[string]any, error)
+	EditMessage(ctx context.Context, chatID string, messageID string, text string) (map[string]any, error)
 	Close() error
 }
 
@@ -141,6 +143,28 @@ func (s *Service) SendMessage(ctx context.Context, channel *models.Channel, chat
 	return s.sendMessage(ctx, channel, chatID, text, "")
 }
 
+func (s *Service) ReplyMessage(ctx context.Context, channel *models.Channel, chatID string, replyToMessageID string, text string) (map[string]any, error) {
+	if channel == nil {
+		return nil, fmt.Errorf("channel is required")
+	}
+	if !channel.Enabled {
+		return nil, fmt.Errorf("channel %s is not active", channel.Name)
+	}
+
+	return s.replyMessage(ctx, channel, chatID, replyToMessageID, text)
+}
+
+func (s *Service) EditMessage(ctx context.Context, channel *models.Channel, chatID string, messageID string, text string) (map[string]any, error) {
+	if channel == nil {
+		return nil, fmt.Errorf("channel is required")
+	}
+	if !channel.Enabled {
+		return nil, fmt.Errorf("channel %s is not active", channel.Name)
+	}
+
+	return s.editMessage(ctx, channel, chatID, messageID, text)
+}
+
 func (s *Service) ConnectContact(ctx context.Context, channelID string, code string) (*models.ChannelContact, error) {
 	contact, err := s.contactStore.GetByConnectionCode(ctx, channelID, strings.TrimSpace(code))
 	if err != nil {
@@ -215,6 +239,26 @@ func (s *Service) sendMessage(ctx context.Context, channel *models.Channel, chat
 	defer cleanup()
 
 	return runtime.SendMessage(ctx, chatID, text, buttonURL)
+}
+
+func (s *Service) editMessage(ctx context.Context, channel *models.Channel, chatID string, messageID string, text string) (map[string]any, error) {
+	runtime, cleanup, err := s.runtimeForChannel(*channel)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	return runtime.EditMessage(ctx, chatID, messageID, text)
+}
+
+func (s *Service) replyMessage(ctx context.Context, channel *models.Channel, chatID string, replyToMessageID string, text string) (map[string]any, error) {
+	runtime, cleanup, err := s.runtimeForChannel(*channel)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	return runtime.ReplyMessage(ctx, chatID, replyToMessageID, text)
 }
 
 func (s *Service) runtimeForChannel(channel models.Channel) (channelRuntime, func(), error) {

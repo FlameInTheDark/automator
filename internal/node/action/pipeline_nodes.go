@@ -24,9 +24,24 @@ type PipelineCatalog interface {
 	GetByID(ctx context.Context, id string) (*models.Pipeline, error)
 }
 
+type runPipelineToolArgumentConfig struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
 type runPipelineConfig struct {
+	PipelineID           string                          `json:"pipelineId"`
+	Params               string                          `json:"params"`
+	ToolName             string                          `json:"toolName"`
+	ToolDescription      string                          `json:"toolDescription"`
+	AllowModelPipelineID bool                            `json:"allowModelPipelineId"`
+	Arguments            []runPipelineToolArgumentConfig `json:"arguments"`
+}
+
+type getPipelineConfig struct {
 	PipelineID           string `json:"pipelineId"`
-	Params               string `json:"params"`
+	IncludeDefinition    bool   `json:"includeDefinition"`
 	ToolName             string `json:"toolName"`
 	ToolDescription      string `json:"toolDescription"`
 	AllowModelPipelineID bool   `json:"allowModelPipelineId"`
@@ -69,6 +84,45 @@ func (e *RunPipelineAction) Validate(config json.RawMessage) error {
 		return fmt.Errorf("pipelineId is required")
 	}
 	return nil
+}
+
+type GetPipelineAction struct {
+	Pipelines PipelineCatalog
+}
+
+func (e *GetPipelineAction) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	output, err := e.loadPipelineOutput(ctx, config, input)
+	if err != nil {
+		return nil, err
+	}
+
+	data, _ := json.Marshal(output)
+	return &node.NodeResult{Output: data}, nil
+}
+
+func (e *GetPipelineAction) Validate(config json.RawMessage) error {
+	var cfg getPipelineConfig
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	if strings.TrimSpace(cfg.PipelineID) == "" {
+		return fmt.Errorf("pipelineId is required")
+	}
+
+	return nil
+}
+
+func (e *GetPipelineAction) loadPipelineOutput(ctx context.Context, config json.RawMessage, input map[string]any) (map[string]any, error) {
+	if e.Pipelines == nil {
+		return nil, fmt.Errorf("pipeline store is not configured")
+	}
+
+	cfg, err := parseGetPipelineConfig(config, input)
+	if err != nil {
+		return nil, err
+	}
+
+	return loadPipelineOutputByID(ctx, e.Pipelines, cfg.PipelineID, cfg.IncludeDefinition)
 }
 
 type PipelineListToolNode struct {
@@ -158,6 +212,110 @@ func (e *PipelineListToolNode) listPipelinesOutput(ctx context.Context, args pip
 	return pipelineops.BuildListOutput(filtered, args.IncludeDefinition)
 }
 
+type PipelineGetToolNode struct {
+	Pipelines PipelineCatalog
+}
+
+func (e *PipelineGetToolNode) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	output, err := (&GetPipelineAction{Pipelines: e.Pipelines}).loadPipelineOutput(ctx, config, input)
+	if err != nil {
+		return nil, err
+	}
+
+	data, _ := json.Marshal(output)
+	return &node.NodeResult{Output: data}, nil
+}
+
+func (e *PipelineGetToolNode) Validate(config json.RawMessage) error {
+	_, err := parseGetPipelineToolConfig(config)
+	return err
+}
+
+func (e *PipelineGetToolNode) ToolDefinition(ctx context.Context, meta node.ToolNodeMetadata, config json.RawMessage) (*llm.ToolDefinition, error) {
+	cfg, err := parseGetPipelineToolConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	description := strings.TrimSpace(cfg.ToolDescription)
+	if description == "" {
+		description = "Get pipeline data for a configured pipeline. By default, the response includes the pipeline definition with nodes, edges, and viewport."
+	}
+	if e.Pipelines != nil && strings.TrimSpace(cfg.PipelineID) != "" {
+		if pipelineModel, err := e.Pipelines.GetByID(ctx, cfg.PipelineID); err == nil && pipelineModel != nil {
+			description = fmt.Sprintf("Get pipeline data for %q. By default, the response includes nodes, edges, and viewport data for editing.", pipelineModel.Name)
+		}
+	}
+	if strings.TrimSpace(cfg.ToolDescription) != "" {
+		description = strings.TrimSpace(cfg.ToolDescription)
+	}
+
+	properties := map[string]any{
+		"includeDefinition": map[string]any{
+			"type":        "boolean",
+			"description": "When true, include nodes, edges, and viewport in the response. Defaults to the node configuration.",
+		},
+	}
+	required := make([]string, 0, 1)
+	if cfg.AllowModelPipelineID {
+		properties["pipelineId"] = map[string]any{
+			"type":        "string",
+			"description": "Pipeline ID to load. Use this when you need to choose the target pipeline dynamically.",
+		}
+		if strings.TrimSpace(cfg.PipelineID) == "" {
+			required = append(required, "pipelineId")
+		}
+	}
+
+	parameters := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		parameters["required"] = required
+	}
+
+	return &llm.ToolDefinition{
+		Type: "function",
+		Function: llm.ToolSpec{
+			Name:        sanitizeToolName(strings.TrimSpace(cfg.ToolName), sanitizeToolName(meta.Label, "get_pipeline")),
+			Description: description,
+			Parameters:  parameters,
+		},
+	}, nil
+}
+
+func (e *PipelineGetToolNode) ExecuteTool(ctx context.Context, config json.RawMessage, args json.RawMessage, _ map[string]any) (any, error) {
+	if e.Pipelines == nil {
+		return nil, fmt.Errorf("pipeline store is not configured")
+	}
+
+	cfg, err := parseGetPipelineToolConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	toolArgs, err := parseGetPipelineToolArgs(args)
+	if err != nil {
+		return nil, err
+	}
+
+	targetPipelineID := strings.TrimSpace(cfg.PipelineID)
+	if cfg.AllowModelPipelineID && strings.TrimSpace(toolArgs.PipelineID) != "" {
+		targetPipelineID = strings.TrimSpace(toolArgs.PipelineID)
+	}
+	if targetPipelineID == "" {
+		return nil, fmt.Errorf("pipelineId is required")
+	}
+
+	includeDefinition := cfg.IncludeDefinition
+	if toolArgs.IncludeDefinition != nil {
+		includeDefinition = *toolArgs.IncludeDefinition
+	}
+
+	return loadPipelineOutputByID(ctx, e.Pipelines, targetPipelineID, includeDefinition)
+}
+
 type PipelineRunToolNode struct {
 	Pipelines PipelineCatalog
 	Runner    PipelineRunner
@@ -225,6 +383,16 @@ func (e *PipelineRunToolNode) ToolDefinition(ctx context.Context, meta node.Tool
 			required = append(required, "pipelineId")
 		}
 	}
+	for _, argument := range cfg.Arguments {
+		description := strings.TrimSpace(argument.Description)
+		if description == "" {
+			description = fmt.Sprintf("Value passed into the called pipeline as arguments.%s.", argument.Name)
+		}
+		properties[argument.Name] = buildRunPipelineArgumentSchema(description)
+		if argument.Required {
+			required = append(required, argument.Name)
+		}
+	}
 
 	parameters := map[string]any{
 		"type":       "object",
@@ -254,7 +422,7 @@ func (e *PipelineRunToolNode) ExecuteTool(ctx context.Context, config json.RawMe
 		return nil, err
 	}
 
-	toolArgs, err := parseRunPipelineToolArgs(args)
+	toolArgs, err := parseRunPipelineToolArgsWithConfig(args, cfg.Arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +435,7 @@ func (e *PipelineRunToolNode) ExecuteTool(ctx context.Context, config json.RawMe
 		return nil, fmt.Errorf("pipelineId is required")
 	}
 
-	result, err := e.Runner.Run(ctx, targetPipelineID, toolArgs.Params)
+	result, err := e.Runner.Run(ctx, targetPipelineID, buildRunPipelineToolInput(toolArgs.Params, toolArgs.Arguments))
 	if err != nil {
 		return nil, fmt.Errorf("run pipeline %s: %w", targetPipelineID, err)
 	}
@@ -294,9 +462,51 @@ func parseRunPipelineToolConfig(config json.RawMessage) (runPipelineConfig, erro
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return runPipelineConfig{}, fmt.Errorf("parse config: %w", err)
 	}
+	arguments, err := normalizeRunPipelineToolArguments(cfg.Arguments)
+	if err != nil {
+		return runPipelineConfig{}, err
+	}
+	cfg.Arguments = arguments
 	if strings.TrimSpace(cfg.PipelineID) == "" && !cfg.AllowModelPipelineID {
 		return runPipelineConfig{}, fmt.Errorf("pipelineId is required")
 	}
+	return cfg, nil
+}
+
+func parseGetPipelineConfig(config json.RawMessage, input map[string]any) (getPipelineConfig, error) {
+	cfg, err := parseGetPipelineToolConfig(config)
+	if err != nil {
+		return getPipelineConfig{}, err
+	}
+	if err := templating.RenderStrings(&cfg, input); err != nil {
+		return getPipelineConfig{}, fmt.Errorf("render config: %w", err)
+	}
+	if strings.TrimSpace(cfg.PipelineID) == "" {
+		return getPipelineConfig{}, fmt.Errorf("pipelineId is required")
+	}
+
+	return cfg, nil
+}
+
+func parseGetPipelineToolConfig(config json.RawMessage) (getPipelineConfig, error) {
+	cfg := getPipelineConfig{IncludeDefinition: true}
+	if len(config) == 0 {
+		if !cfg.AllowModelPipelineID {
+			return getPipelineConfig{}, fmt.Errorf("pipelineId is required")
+		}
+		return cfg, nil
+	}
+
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return getPipelineConfig{}, fmt.Errorf("parse config: %w", err)
+	}
+	if !hasJSONField(config, "includeDefinition") {
+		cfg.IncludeDefinition = true
+	}
+	if strings.TrimSpace(cfg.PipelineID) == "" && !cfg.AllowModelPipelineID {
+		return getPipelineConfig{}, fmt.Errorf("pipelineId is required")
+	}
+
 	return cfg, nil
 }
 
@@ -339,22 +549,11 @@ func parseToolParams(args json.RawMessage) (map[string]any, error) {
 type runPipelineToolArgs struct {
 	PipelineID string         `json:"pipelineId"`
 	Params     map[string]any `json:"params"`
+	Arguments  map[string]any `json:"-"`
 }
 
 func parseRunPipelineToolArgs(args json.RawMessage) (runPipelineToolArgs, error) {
-	if len(args) == 0 {
-		return runPipelineToolArgs{Params: make(map[string]any)}, nil
-	}
-
-	var payload runPipelineToolArgs
-	if err := json.Unmarshal(args, &payload); err != nil {
-		return runPipelineToolArgs{}, fmt.Errorf("parse tool args: %w", err)
-	}
-	if payload.Params == nil {
-		payload.Params = make(map[string]any)
-	}
-
-	return payload, nil
+	return parseRunPipelineToolArgsWithConfig(args, nil)
 }
 
 func parsePipelineListToolArgs(args json.RawMessage) (pipelineListToolArgs, error) {
@@ -365,6 +564,24 @@ func parsePipelineListToolArgs(args json.RawMessage) (pipelineListToolArgs, erro
 	var payload pipelineListToolArgs
 	if err := json.Unmarshal(args, &payload); err != nil {
 		return pipelineListToolArgs{}, fmt.Errorf("parse tool args: %w", err)
+	}
+
+	return payload, nil
+}
+
+type getPipelineToolArgs struct {
+	PipelineID        string `json:"pipelineId"`
+	IncludeDefinition *bool  `json:"includeDefinition"`
+}
+
+func parseGetPipelineToolArgs(args json.RawMessage) (getPipelineToolArgs, error) {
+	if len(args) == 0 {
+		return getPipelineToolArgs{}, nil
+	}
+
+	var payload getPipelineToolArgs
+	if err := json.Unmarshal(args, &payload); err != nil {
+		return getPipelineToolArgs{}, fmt.Errorf("parse tool args: %w", err)
 	}
 
 	return payload, nil
@@ -392,6 +609,28 @@ func buildRunPipelineOutput(result *pipeline.RunResult) map[string]any {
 	return output
 }
 
+func loadPipelineOutputByID(ctx context.Context, catalog PipelineCatalog, pipelineID string, includeDefinition bool) (map[string]any, error) {
+	pipelineID = strings.TrimSpace(pipelineID)
+	if pipelineID == "" {
+		return nil, fmt.Errorf("pipelineId is required")
+	}
+
+	pipelineModel, err := catalog.GetByID(ctx, pipelineID)
+	if err != nil {
+		return nil, fmt.Errorf("load pipeline %s: %w", pipelineID, err)
+	}
+	if pipelineModel == nil {
+		return nil, fmt.Errorf("pipeline %s not found", pipelineID)
+	}
+
+	output, err := pipelineops.BuildPipelineOutput(*pipelineModel, includeDefinition)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{"pipeline": output}, nil
+}
+
 func copyParamsMap(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return make(map[string]any)
@@ -403,6 +642,192 @@ func copyParamsMap(input map[string]any) map[string]any {
 	}
 
 	return copied
+}
+
+func buildRunPipelineToolInput(params map[string]any, arguments map[string]any) map[string]any {
+	input := copyParamsMap(params)
+	if len(arguments) == 0 {
+		return input
+	}
+
+	mergedArguments := make(map[string]any)
+	if existing, ok := input["arguments"].(map[string]any); ok {
+		for key, value := range existing {
+			mergedArguments[key] = value
+		}
+	}
+	for key, value := range arguments {
+		mergedArguments[key] = value
+	}
+	input["arguments"] = mergedArguments
+
+	return input
+}
+
+func parseRunPipelineToolArgsWithConfig(args json.RawMessage, configuredArguments []runPipelineToolArgumentConfig) (runPipelineToolArgs, error) {
+	payload, err := parseToolArgMap(args)
+	if err != nil {
+		return runPipelineToolArgs{}, err
+	}
+
+	pipelineID, _, err := parseOptionalStringArg(payload, "pipelineId")
+	if err != nil {
+		return runPipelineToolArgs{}, err
+	}
+	params, _, err := parseOptionalObjectArg(payload, "params")
+	if err != nil {
+		return runPipelineToolArgs{}, err
+	}
+
+	arguments := make(map[string]any, len(configuredArguments))
+	for _, configuredArgument := range configuredArguments {
+		raw, ok := payload[configuredArgument.Name]
+		if !ok {
+			if configuredArgument.Required {
+				return runPipelineToolArgs{}, fmt.Errorf("%s is required", configuredArgument.Name)
+			}
+			continue
+		}
+		if strings.TrimSpace(string(raw)) == "null" {
+			if configuredArgument.Required {
+				return runPipelineToolArgs{}, fmt.Errorf("%s is required", configuredArgument.Name)
+			}
+			continue
+		}
+
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return runPipelineToolArgs{}, fmt.Errorf("parse %s: %w", configuredArgument.Name, err)
+		}
+		arguments[configuredArgument.Name] = value
+	}
+
+	return runPipelineToolArgs{
+		PipelineID: strings.TrimSpace(pipelineID),
+		Params:     params,
+		Arguments:  arguments,
+	}, nil
+}
+
+func normalizeRunPipelineToolArguments(arguments []runPipelineToolArgumentConfig) ([]runPipelineToolArgumentConfig, error) {
+	if len(arguments) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]runPipelineToolArgumentConfig, 0, len(arguments))
+	seen := make(map[string]struct{}, len(arguments))
+	for index, argument := range arguments {
+		name := strings.TrimSpace(argument.Name)
+		if name == "" {
+			return nil, fmt.Errorf("arguments[%d].name is required", index)
+		}
+		if !isValidToolArgumentName(name) {
+			return nil, fmt.Errorf("arguments[%d].name must start with a letter or underscore and contain only letters, numbers, and underscores", index)
+		}
+
+		lowerName := strings.ToLower(name)
+		switch lowerName {
+		case "pipelineid", "params", "arguments":
+			return nil, fmt.Errorf("arguments[%d].name %q is reserved", index, name)
+		}
+		if _, exists := seen[lowerName]; exists {
+			return nil, fmt.Errorf("duplicate argument name %q", name)
+		}
+		seen[lowerName] = struct{}{}
+
+		normalized = append(normalized, runPipelineToolArgumentConfig{
+			Name:        name,
+			Description: strings.TrimSpace(argument.Description),
+			Required:    argument.Required,
+		})
+	}
+
+	return normalized, nil
+}
+
+func buildRunPipelineArgumentSchema(description string) map[string]any {
+	schema := map[string]any{
+		"description": description,
+		"oneOf": []map[string]any{
+			{"type": "string"},
+			{"type": "number"},
+			{"type": "boolean"},
+			{
+				"type":                 "object",
+				"additionalProperties": true,
+			},
+			{
+				"type": "array",
+				"items": map[string]any{
+					"oneOf": []map[string]any{
+						{"type": "string"},
+						{"type": "number"},
+						{"type": "boolean"},
+						{
+							"type":                 "object",
+							"additionalProperties": true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return schema
+}
+
+func parseOptionalObjectArg(payload map[string]json.RawMessage, key string) (map[string]any, bool, error) {
+	raw, ok := payload[key]
+	if !ok {
+		return map[string]any{}, false, nil
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return map[string]any{}, true, nil
+	}
+
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, true, fmt.Errorf("parse %s: %w", key, err)
+	}
+	if value == nil {
+		value = map[string]any{}
+	}
+
+	return value, true, nil
+}
+
+func hasJSONField(raw json.RawMessage, key string) bool {
+	if len(raw) == 0 {
+		return false
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+
+	_, ok := payload[key]
+	return ok
+}
+
+func isValidToolArgumentName(name string) bool {
+	if name == "" {
+		return false
+	}
+
+	for index, r := range name {
+		if index == 0 {
+			if !(unicode.IsLetter(r) || r == '_') {
+				return false
+			}
+			continue
+		}
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+			return false
+		}
+	}
+
+	return true
 }
 
 func sanitizeToolName(label string, fallback string) string {

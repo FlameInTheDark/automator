@@ -1,5 +1,6 @@
 import type {
   ActiveExecution,
+  AuthSession,
   Channel,
   ChannelContact,
   Cluster,
@@ -9,21 +10,40 @@ import type {
   LLMChatResponse,
   LLMModelInfo,
   LLMProvider,
+  KubernetesCluster,
+  KubernetesTestConnectionResult,
   Pipeline,
   PipelineRunResponse,
+  User,
 } from '../types'
 
 const API_BASE = '/api/v1'
 
+export class APIError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'APIError'
+    this.status = status
+  }
+}
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers)
+  if (options?.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   const res = await fetch(`${API_BASE}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    credentials: 'include',
+    headers,
   })
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(error.error || `Request failed: ${res.status}`)
+    throw new APIError(error.error || `Request failed: ${res.status}`, res.status)
   }
 
   if (res.status === 204) return undefined as unknown as T
@@ -31,12 +51,31 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  auth: {
+    session: () => request<AuthSession>('/auth/session'),
+    login: (data: { username: string; password: string }) => request<AuthSession>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+    logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  },
+  users: {
+    list: () => request<User[]>('/users'),
+    create: (data: { username: string; password: string }) => request<User>('/users', { method: 'POST', body: JSON.stringify(data) }),
+    changePassword: (data: { current_password: string; new_password: string }) => request<AuthSession>('/users/change-password', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+  },
   clusters: {
     list: () => request<Cluster[]>('/clusters'),
     create: (data: unknown) => request<Cluster>('/clusters', { method: 'POST', body: JSON.stringify(data) }),
     get: (id: string) => request<Cluster>(`/clusters/${id}`),
     update: (id: string, data: unknown) => request<Cluster>(`/clusters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) => request<void>(`/clusters/${id}`, { method: 'DELETE' }),
+  },
+  kubernetesClusters: {
+    list: () => request<KubernetesCluster[]>('/kubernetes/clusters'),
+    create: (data: unknown) => request<KubernetesCluster>('/kubernetes/clusters', { method: 'POST', body: JSON.stringify(data) }),
+    get: (id: string) => request<KubernetesCluster>(`/kubernetes/clusters/${id}`),
+    update: (id: string, data: unknown) => request<KubernetesCluster>(`/kubernetes/clusters/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) => request<void>(`/kubernetes/clusters/${id}`, { method: 'DELETE' }),
+    test: (data: unknown) => request<KubernetesTestConnectionResult>('/kubernetes/clusters/test', { method: 'POST', body: JSON.stringify(data) }),
   },
   dashboard: {
     stats: () => request<DashboardStats>('/dashboard/stats'),

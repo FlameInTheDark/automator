@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -218,18 +219,20 @@ func copyToolExecutionInput(input map[string]any) map[string]any {
 }
 
 type LLMChatHandler struct {
-	providerStore *query.LLMProviderStore
-	clusterStore  *query.ClusterStore
-	pipelineStore *query.PipelineStore
-	runner        *pipeline.ExecutionRunner
-	scheduler     llm.ToolPipelineReloader
-	skillStore    skills.Reader
-	shellRunner   shellcmd.Runner
+	providerStore   *query.LLMProviderStore
+	clusterStore    *query.ClusterStore
+	kubernetesStore *query.KubernetesClusterStore
+	pipelineStore   *query.PipelineStore
+	runner          *pipeline.ExecutionRunner
+	scheduler       llm.ToolPipelineReloader
+	skillStore      skills.Reader
+	shellRunner     shellcmd.Runner
 }
 
 func NewLLMChatHandler(
 	providerStore *query.LLMProviderStore,
 	clusterStore *query.ClusterStore,
+	kubernetesStore *query.KubernetesClusterStore,
 	pipelineStore *query.PipelineStore,
 	runner *pipeline.ExecutionRunner,
 	scheduler llm.ToolPipelineReloader,
@@ -237,21 +240,32 @@ func NewLLMChatHandler(
 	shellRunner shellcmd.Runner,
 ) *LLMChatHandler {
 	return &LLMChatHandler{
-		providerStore: providerStore,
-		clusterStore:  clusterStore,
-		pipelineStore: pipelineStore,
-		runner:        runner,
-		scheduler:     scheduler,
-		skillStore:    skillStore,
-		shellRunner:   shellRunner,
+		providerStore:   providerStore,
+		clusterStore:    clusterStore,
+		kubernetesStore: kubernetesStore,
+		pipelineStore:   pipelineStore,
+		runner:          runner,
+		scheduler:       scheduler,
+		skillStore:      skillStore,
+		shellRunner:     shellRunner,
 	}
 }
 
 func (h *LLMChatHandler) Chat(c *fiber.Ctx) error {
 	var req struct {
-		Message    string `json:"message"`
-		ProviderID string `json:"provider_id,omitempty"`
-		ClusterID  string `json:"cluster_id,omitempty"`
+		Message      string `json:"message"`
+		ProviderID   string `json:"provider_id,omitempty"`
+		ClusterID    string `json:"cluster_id,omitempty"`
+		Integrations struct {
+			Proxmox struct {
+				Enabled   *bool  `json:"enabled,omitempty"`
+				ClusterID string `json:"cluster_id,omitempty"`
+			} `json:"proxmox"`
+			Kubernetes struct {
+				Enabled   *bool  `json:"enabled,omitempty"`
+				ClusterID string `json:"cluster_id,omitempty"`
+			} `json:"kubernetes"`
+		} `json:"integrations"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -300,30 +314,93 @@ func (h *LLMChatHandler) Chat(c *fiber.Ctx) error {
 		})
 	}
 
-	var selectedCluster *models.Cluster
-	if req.ClusterID != "" {
-		cluster, err := h.clusterStore.GetByID(ctx, req.ClusterID)
+	proxmoxExplicit := req.Integrations.Proxmox.Enabled != nil || strings.TrimSpace(req.Integrations.Proxmox.ClusterID) != ""
+	kubernetesExplicit := req.Integrations.Kubernetes.Enabled != nil || strings.TrimSpace(req.Integrations.Kubernetes.ClusterID) != ""
+
+	proxmoxEnabled := true
+	if proxmoxExplicit {
+		proxmoxEnabled = false
+		if req.Integrations.Proxmox.Enabled != nil {
+			proxmoxEnabled = *req.Integrations.Proxmox.Enabled
+		}
+		if strings.TrimSpace(req.Integrations.Proxmox.ClusterID) != "" {
+			proxmoxEnabled = true
+		}
+	}
+
+	kubernetesEnabled := false
+	if kubernetesExplicit {
+		if req.Integrations.Kubernetes.Enabled != nil {
+			kubernetesEnabled = *req.Integrations.Kubernetes.Enabled
+		}
+		if strings.TrimSpace(req.Integrations.Kubernetes.ClusterID) != "" {
+			kubernetesEnabled = true
+		}
+	}
+
+	selectedProxmoxClusterID := strings.TrimSpace(req.Integrations.Proxmox.ClusterID)
+	if selectedProxmoxClusterID == "" && strings.TrimSpace(req.ClusterID) != "" && !proxmoxExplicit {
+		selectedProxmoxClusterID = strings.TrimSpace(req.ClusterID)
+		proxmoxEnabled = true
+	}
+	selectedKubernetesClusterID := strings.TrimSpace(req.Integrations.Kubernetes.ClusterID)
+
+	var selectedProxmoxCluster *models.Cluster
+	if proxmoxEnabled && selectedProxmoxClusterID != "" {
+		cluster, err := h.clusterStore.GetByID(ctx, selectedProxmoxClusterID)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "cluster not found",
 			})
 		}
-		selectedCluster = cluster
+		selectedProxmoxCluster = cluster
 	}
 
-	toolRegistry := llm.NewToolRegistry(
-		h.clusterStore,
-		h.pipelineStore,
-		h.scheduler,
-		&chatPipelineRunner{store: h.pipelineStore, runner: h.runner},
-		req.ClusterID,
-		h.skillStore,
-		h.shellRunner,
-	)
+	var selectedKubernetesCluster *models.KubernetesCluster
+	if kubernetesEnabled && selectedKubernetesClusterID != "" {
+		cluster, err := h.kubernetesStore.GetByID(ctx, selectedKubernetesClusterID)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "kubernetes cluster not found",
+			})
+		}
+		selectedKubernetesCluster = cluster
+	}
 
-	systemPrompt := "You are an automation assistant for Proxmox and Automator pipelines. Use the available tools to manage clusters, inspect local skills, run shell commands when appropriate, and create, edit, run, activate, or deactivate pipelines when the user asks."
-	if selectedCluster != nil {
-		systemPrompt += " The selected cluster is " + selectedCluster.Name + " (" + selectedCluster.ID + "). Use it for cluster-scoped tool calls unless the user explicitly asks for a different configured cluster."
+	toolRegistry := llm.NewToolRegistryWithOptions(llm.ToolRegistryOptions{
+		ProxmoxStore:               h.clusterStore,
+		KubernetesStore:            h.kubernetesStore,
+		PipelineStore:              h.pipelineStore,
+		PipelineReloader:           h.scheduler,
+		PipelineRunner:             &chatPipelineRunner{store: h.pipelineStore, runner: h.runner},
+		DefaultProxmoxClusterID:    selectedProxmoxClusterID,
+		DefaultKubernetesClusterID: selectedKubernetesClusterID,
+		EnableProxmox:              proxmoxEnabled,
+		EnableKubernetes:           kubernetesEnabled,
+		SkillStore:                 h.skillStore,
+		ShellRunner:                h.shellRunner,
+	})
+
+	systemPrompt := "You are an automation assistant for infrastructure and Automator pipelines. Use the available tools to manage enabled integrations, inspect local skills, run shell commands when appropriate, and create, edit, run, activate, or deactivate pipelines when the user asks."
+	integrationStatements := make([]string, 0, 2)
+	if proxmoxEnabled {
+		if selectedProxmoxCluster != nil {
+			integrationStatements = append(integrationStatements, "Proxmox integration is enabled and the selected cluster is "+selectedProxmoxCluster.Name+" ("+selectedProxmoxCluster.ID+"). Use it for Proxmox tool calls unless the user explicitly asks for a different configured cluster.")
+		} else {
+			integrationStatements = append(integrationStatements, "Proxmox integration is enabled.")
+		}
+	}
+	if kubernetesEnabled {
+		if selectedKubernetesCluster != nil {
+			integrationStatements = append(integrationStatements, "Kubernetes integration is enabled and the selected cluster is "+selectedKubernetesCluster.Name+" ("+selectedKubernetesCluster.ID+") using context "+selectedKubernetesCluster.ContextName+". Use it for Kubernetes tool calls unless the user explicitly asks for a different configured cluster.")
+		} else {
+			integrationStatements = append(integrationStatements, "Kubernetes integration is enabled.")
+		}
+	}
+	if len(integrationStatements) == 0 {
+		systemPrompt += " No infrastructure integration is enabled for this chat, so only local, pipeline, and skill tools are available."
+	} else {
+		systemPrompt += " " + strings.Join(integrationStatements, " ")
 	}
 	if h.skillStore != nil {
 		if skillsSummary := h.skillStore.SummaryText(); skillsSummary != "" {

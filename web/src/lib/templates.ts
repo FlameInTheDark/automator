@@ -49,6 +49,69 @@ const NODE_OUTPUT_HINTS: Partial<Record<NodeType, NodeOutputHint[]>> = {
     { expression: 'input.status_code', label: 'HTTP status code' },
     { expression: 'input.response', label: 'Response body (JSON)' },
   ],
+  'action:kubernetes_api_resources': [
+    { expression: 'input.resources', label: 'API resources list (JSON)' },
+    { expression: 'input.count', label: 'Resource type count' },
+  ],
+  'action:kubernetes_list_resources': [
+    { expression: 'input.clusterName', label: 'Cluster name' },
+    { expression: 'input.namespace', label: 'Namespace' },
+    { expression: 'input.resourceRef.kind', label: 'Resolved kind' },
+    { expression: 'input.items', label: 'Resource list (JSON)' },
+    { expression: 'input.count', label: 'Item count' },
+  ],
+  'action:kubernetes_get_resource': [
+    { expression: 'input.clusterName', label: 'Cluster name' },
+    { expression: 'input.namespace', label: 'Namespace' },
+    { expression: 'input.resourceRef.name', label: 'Resource name' },
+    { expression: 'input.item', label: 'Fetched resource (JSON)' },
+  ],
+  'action:kubernetes_apply_manifest': [
+    { expression: 'input.clusterName', label: 'Cluster name' },
+    { expression: 'input.namespace', label: 'Namespace' },
+    { expression: 'input.refs', label: 'Applied references (JSON)' },
+    { expression: 'input.items', label: 'Applied resources (JSON)' },
+    { expression: 'input.count', label: 'Applied resource count' },
+  ],
+  'action:kubernetes_patch_resource': [
+    { expression: 'input.resourceRef.name', label: 'Patched resource name' },
+    { expression: 'input.item', label: 'Patched resource (JSON)' },
+  ],
+  'action:kubernetes_delete_resource': [
+    { expression: 'input.resourceRef.kind', label: 'Deleted resource kind' },
+    { expression: 'input.deleted', label: 'Deleted item count' },
+    { expression: 'input.mode', label: 'Delete mode' },
+  ],
+  'action:kubernetes_scale_resource': [
+    { expression: 'input.resourceRef.name', label: 'Scaled workload name' },
+    { expression: 'input.item.spec.replicas', label: 'Replica count' },
+    { expression: 'input.item.status.readyReplicas', label: 'Ready replicas' },
+  ],
+  'action:kubernetes_rollout_restart': [
+    { expression: 'input.resourceRef.name', label: 'Restarted workload name' },
+    { expression: 'input.item.metadata.annotations', label: 'Updated annotations (JSON)' },
+  ],
+  'action:kubernetes_rollout_status': [
+    { expression: 'input.resourceRef.name', label: 'Rollout name' },
+    { expression: 'input.status.ready', label: 'Rollout ready' },
+    { expression: 'input.status.message', label: 'Rollout status message' },
+    { expression: 'input.status.readyReplicas', label: 'Ready replicas' },
+  ],
+  'action:kubernetes_pod_logs': [
+    { expression: 'input.resourceRef.name', label: 'Pod name' },
+    { expression: 'input.logs', label: 'Pod logs' },
+  ],
+  'action:kubernetes_pod_exec': [
+    { expression: 'input.resourceRef.name', label: 'Pod name' },
+    { expression: 'input.result.stdout', label: 'Command stdout' },
+    { expression: 'input.result.stderr', label: 'Command stderr' },
+  ],
+  'action:kubernetes_events': [
+    { expression: 'input.namespace', label: 'Namespace' },
+    { expression: 'input.items', label: 'Events list (JSON)' },
+    { expression: 'input.count', label: 'Event count' },
+    { expression: 'input.items[0].reason', label: 'First event reason' },
+  ],
   'logic:condition': [
     { expression: 'input.result', label: 'Condition result' },
     { expression: 'input.condition', label: 'Condition expression' },
@@ -60,6 +123,14 @@ const NODE_OUTPUT_HINTS: Partial<Record<NodeType, NodeOutputHint[]>> = {
     { expression: 'input.matched', label: 'Matched conditions (JSON)' },
     { expression: 'input.hasMatch', label: 'Any condition matched' },
     { expression: 'input.defaultMatched', label: 'Else branch matched' },
+  ],
+  'logic:aggregate': [
+    { expression: 'input.count', label: 'Aggregated input count' },
+    { expression: 'input.items', label: 'Ordered upstream outputs (JSON)' },
+    { expression: 'input.entries', label: 'Upstream entries with source metadata (JSON)' },
+    { expression: 'input.entries[0].nodeId', label: 'First resolved node ID' },
+    { expression: 'input.entries[0].originalNodeId', label: 'First original node ID' },
+    { expression: 'input.byNodeId', label: 'Upstream outputs keyed by resolved node ID (JSON)' },
   ],
   'llm:prompt': [
     { expression: 'input.prompt', label: 'Rendered prompt' },

@@ -10,6 +10,38 @@ export interface Cluster {
   updated_at: string
 }
 
+export interface KubernetesManualAuthConfig {
+  server: string
+  token: string
+  username: string
+  password: string
+  ca_data: string
+  client_certificate_data: string
+  client_key_data: string
+  insecure_skip_tls_verify: boolean
+}
+
+export interface KubernetesCluster {
+  id: string
+  name: string
+  source_type: string
+  kubeconfig?: string
+  context_name: string
+  default_namespace: string
+  server: string
+  manual?: KubernetesManualAuthConfig
+  created_at: string
+  updated_at: string
+}
+
+export interface KubernetesTestConnectionResult {
+  contexts: string[]
+  effective_context: string
+  default_namespace: string
+  server: string
+  server_version: string
+}
+
 export interface Channel {
   id: string
   name: string
@@ -70,6 +102,19 @@ export interface DashboardStats {
   active_jobs: number
   executions_24h: number
   channels: number
+}
+
+export interface AuthSession {
+  authenticated: boolean
+  username: string
+  expires_at: string
+}
+
+export interface User {
+  id: string
+  username: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Execution {
@@ -185,20 +230,48 @@ export type NodeType =
   | 'action:vm_start'
   | 'action:vm_stop'
   | 'action:vm_clone'
+  | 'action:kubernetes_api_resources'
+  | 'action:kubernetes_list_resources'
+  | 'action:kubernetes_get_resource'
+  | 'action:kubernetes_apply_manifest'
+  | 'action:kubernetes_patch_resource'
+  | 'action:kubernetes_delete_resource'
+  | 'action:kubernetes_scale_resource'
+  | 'action:kubernetes_rollout_restart'
+  | 'action:kubernetes_rollout_status'
+  | 'action:kubernetes_pod_logs'
+  | 'action:kubernetes_pod_exec'
+  | 'action:kubernetes_events'
   | 'action:http'
   | 'action:shell_command'
   | 'action:lua'
   | 'action:channel_send_message'
+  | 'action:channel_reply_message'
+  | 'action:channel_edit_message'
   | 'action:channel_send_and_wait'
+  | 'action:pipeline_get'
   | 'action:pipeline_run'
   | 'tool:proxmox_list_nodes'
   | 'tool:proxmox_list_workloads'
   | 'tool:vm_start'
   | 'tool:vm_stop'
   | 'tool:vm_clone'
+  | 'tool:kubernetes_api_resources'
+  | 'tool:kubernetes_list_resources'
+  | 'tool:kubernetes_get_resource'
+  | 'tool:kubernetes_apply_manifest'
+  | 'tool:kubernetes_patch_resource'
+  | 'tool:kubernetes_delete_resource'
+  | 'tool:kubernetes_scale_resource'
+  | 'tool:kubernetes_rollout_restart'
+  | 'tool:kubernetes_rollout_status'
+  | 'tool:kubernetes_pod_logs'
+  | 'tool:kubernetes_pod_exec'
+  | 'tool:kubernetes_events'
   | 'tool:http'
   | 'tool:shell_command'
   | 'tool:pipeline_list'
+  | 'tool:pipeline_get'
   | 'tool:pipeline_create'
   | 'tool:pipeline_update'
   | 'tool:pipeline_delete'
@@ -211,6 +284,7 @@ export type NodeType =
   | 'logic:return'
   | 'llm:prompt'
   | 'llm:agent'
+  | 'visual:group'
 
 export interface NodeTypeDefinition {
   type: NodeType

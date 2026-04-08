@@ -62,7 +62,7 @@ func (s *LLMProviderStore) GetByID(ctx context.Context, id string) (*models.LLMP
 	}
 
 	if s.encryptor != nil && p.APIKey != "" {
-		p.APIKey, err = s.encryptor.Decrypt(p.APIKey)
+		p.APIKey, err = s.encryptor.DecryptCompat(p.APIKey)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt api key: %w", err)
 		}
@@ -158,7 +158,7 @@ func (s *LLMProviderStore) GetDefault(ctx context.Context) (*models.LLMProvider,
 	}
 
 	if s.encryptor != nil && p.APIKey != "" {
-		p.APIKey, err = s.encryptor.Decrypt(p.APIKey)
+		p.APIKey, err = s.encryptor.DecryptCompat(p.APIKey)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt api key: %w", err)
 		}

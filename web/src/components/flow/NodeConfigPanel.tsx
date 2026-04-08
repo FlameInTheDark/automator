@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { Edge, Node } from '@xyflow/react'
 import {
   X, Settings, Play, Square, Copy, Globe, Code, Zap, Clock, Webhook,
-  GitBranch, Split, Brain, Link, Plus, Trash2, MessageSquare, Send,
+  GitBranch, Split, Brain, Link, Plus, Trash2, MessageSquare, Send, RefreshCw,
   Bot, Workflow, List, Wrench, CornerDownLeft, CircleHelp,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
@@ -17,6 +17,8 @@ import Button from '../ui/Button'
 import { TemplateInput, TemplateTextarea } from '../ui/TemplateFields'
 import { buildTemplateSuggestions } from '../../lib/templates'
 import LuaEditorModal from './LuaEditorModal'
+import HelpTooltip from '../ui/HelpTooltip'
+import KubernetesNodeConfigSection, { kubernetesNodeTypes } from './KubernetesNodeConfigSection'
 
 const iconMap: Record<string, React.ElementType> = {
   zap: Zap,
@@ -37,6 +39,7 @@ const iconMap: Record<string, React.ElementType> = {
   workflow: Workflow,
   list: List,
   wrench: Wrench,
+  'refresh-cw': RefreshCw,
   'trash-2': Trash2,
   'corner-down-left': CornerDownLeft,
 }
@@ -57,6 +60,8 @@ const proxmoxNodeTypes = new Set<NodeType>([
 const channelNodeTypes = new Set<NodeType>([
   'trigger:channel_message',
   'action:channel_send_message',
+  'action:channel_reply_message',
+  'action:channel_edit_message',
   'action:channel_send_and_wait',
   'tool:channel_send_and_wait',
 ])
@@ -68,6 +73,15 @@ const pipelineMutationToolNodeTypes = new Set<NodeType>([
 ])
 
 const EXPR_LANGUAGE_DOCS_URL = 'https://expr-lang.org/docs/language-definition'
+const DEFAULT_GROUP_COLOR = '#64748b'
+
+function supportsNodeErrorPolicy(nodeType: NodeType): boolean {
+  return !nodeType.startsWith('tool:')
+    && nodeType !== 'visual:group'
+    && nodeType !== 'logic:return'
+    && nodeType !== 'logic:condition'
+    && nodeType !== 'logic:switch'
+}
 
 interface NodeConfigPanelProps {
   pipelineId: string
@@ -88,6 +102,19 @@ type SwitchConditionConfig = {
   id: string
   label: string
   expression: string
+}
+
+type PipelineToolArgumentConfig = {
+  name: string
+  description: string
+  required: boolean
+}
+
+type AggregateInputConfig = {
+  nodeId: string
+  label: string
+  nodeType: string
+  sourceHandles: string[]
 }
 
 function normalizeSwitchConditions(value: unknown): SwitchConditionConfig[] {
@@ -129,22 +156,160 @@ function createSwitchCondition(existing: SwitchConditionConfig[]): SwitchConditi
   }
 }
 
-function ExpressionLabel() {
+function normalizePipelineToolArguments(value: unknown): PipelineToolArgumentConfig[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((argument) => {
+    const record = typeof argument === 'object' && argument !== null
+      ? argument as Record<string, unknown>
+      : {}
+
+    return {
+      name: typeof record.name === 'string' ? record.name : '',
+      description: typeof record.description === 'string' ? record.description : '',
+      required: Boolean(record.required),
+    }
+  })
+}
+
+function createPipelineToolArgument(existing: PipelineToolArgumentConfig[]): PipelineToolArgumentConfig {
+  const takenNames = new Set(existing.map((argument) => argument.name.trim()).filter(Boolean))
+  let index = existing.length + 1
+  let name = `argument_${index}`
+
+  while (takenNames.has(name)) {
+    index += 1
+    name = `argument_${index}`
+  }
+
+  return {
+    name,
+    description: '',
+    required: false,
+  }
+}
+
+function FieldLabel({
+  children,
+  tooltip,
+  docsHref,
+  docsLabel,
+}: {
+  children: React.ReactNode
+  tooltip?: React.ReactNode
+  docsHref?: string
+  docsLabel?: string
+}) {
   return (
     <div className="mb-1.5 flex items-center gap-2">
-      <Label className="mb-0">Expression</Label>
-      <a
-        href={EXPR_LANGUAGE_DOCS_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-bg-overlay text-text-muted transition-colors hover:border-accent/50 hover:text-accent"
-        title="Open expression language documentation"
-        aria-label="Open expression language documentation"
-      >
-        <CircleHelp className="h-3.5 w-3.5" />
-      </a>
+      <Label className="mb-0">{children}</Label>
+      {tooltip && (
+        <HelpTooltip content={tooltip} label={typeof children === 'string' ? `Help for ${children}` : 'Show help'} />
+      )}
+      {docsHref && (
+        <a
+          href={docsHref}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-bg-overlay text-text-muted transition-colors hover:border-accent/50 hover:text-accent"
+          title={docsLabel}
+          aria-label={docsLabel}
+        >
+          <CircleHelp className="h-3.5 w-3.5" />
+        </a>
+      )}
     </div>
   )
+}
+
+function ExpressionLabel() {
+  return (
+    <FieldLabel
+      docsHref={EXPR_LANGUAGE_DOCS_URL}
+      docsLabel="Open expression language documentation"
+    >
+      Expression
+    </FieldLabel>
+  )
+}
+
+function normalizeGroupColor(value: unknown): string {
+  if (typeof value !== 'string') {
+    return DEFAULT_GROUP_COLOR
+  }
+
+  return /^#(?:[0-9a-fA-F]{6})$/.test(value.trim())
+    ? value.trim()
+    : DEFAULT_GROUP_COLOR
+}
+
+function stringifyHeaders(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return '{}'
+  }
+
+  const normalized = Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((acc, [key, headerValue]) => {
+    const trimmedKey = key.trim()
+    if (!trimmedKey) {
+      return acc
+    }
+
+    acc[trimmedKey] = typeof headerValue === 'string' ? headerValue : String(headerValue ?? '')
+    return acc
+  }, {})
+
+  return JSON.stringify(normalized)
+}
+
+function parseHeadersJSON(raw: string): { value: Record<string, string> | null; error: string | null } {
+  const trimmed = raw.trim()
+  if (trimmed === '') {
+    return { value: {}, error: null }
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { value: null, error: 'Headers must be a JSON object.' }
+    }
+
+    const normalized = Object.entries(parsed as Record<string, unknown>).reduce<Record<string, string>>((acc, [key, headerValue]) => {
+      const trimmedKey = key.trim()
+      if (!trimmedKey) {
+        return acc
+      }
+
+      acc[trimmedKey] = typeof headerValue === 'string' ? headerValue : String(headerValue ?? '')
+      return acc
+    }, {})
+
+    return { value: normalized, error: null }
+  } catch {
+    return { value: null, error: 'Headers must be valid JSON.' }
+  }
+}
+
+function normalizeAggregateIDOverrides(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((acc, [rawSourceId, rawAlias]) => {
+    const sourceId = rawSourceId.trim()
+    if (!sourceId || typeof rawAlias !== 'string') {
+      return acc
+    }
+
+    const alias = rawAlias.trim()
+    if (!alias) {
+      return acc
+    }
+
+    acc[sourceId] = alias
+    return acc
+  }, {})
 }
 
 export default function NodeConfigPanel({
@@ -165,9 +330,14 @@ export default function NodeConfigPanel({
   const [label, setLabel] = useState(nodeLabel)
   const [localConfig, setLocalConfig] = useState(config)
   const [isLuaEditorOpen, setIsLuaEditorOpen] = useState(false)
+  const [httpHeadersJSON, setHTTPHeadersJSON] = useState(() => stringifyHeaders(config.headers))
   const { data: clusters } = useQuery({
     queryKey: ['clusters'],
     queryFn: () => api.clusters.list(),
+  })
+  const { data: kubernetesClusters } = useQuery({
+    queryKey: ['kubernetes-clusters'],
+    queryFn: () => api.kubernetesClusters.list(),
   })
   const { data: llmProviders } = useQuery({
     queryKey: ['llm-providers'],
@@ -209,6 +379,7 @@ export default function NodeConfigPanel({
     setLabel(nodeLabel)
     setLocalConfig(config)
     setIsLuaEditorOpen(false)
+    setHTTPHeadersJSON(stringifyHeaders(config.headers))
   }, [nodeId, nodeLabel, config])
 
   useEffect(() => {
@@ -233,6 +404,7 @@ export default function NodeConfigPanel({
   const Icon = iconMap[nodeDef?.icon || 'zap']
   const color = getNodeColor(nodeType)
   const showClusterSelect = proxmoxNodeTypes.has(nodeType)
+  const showKubernetesClusterSelect = kubernetesNodeTypes.has(nodeType)
   const showChannelSelect = channelNodeTypes.has(nodeType)
   const templateSuggestions = useMemo<TemplateSuggestion[]>(() => (
     buildTemplateSuggestions(nodeId, nodes, edges, latestExecutionDetail?.node_executions ?? [])
@@ -264,7 +436,11 @@ export default function NodeConfigPanel({
     }
     return options
   }, [localConfig.model, providerModels])
-  const availablePipelines = useMemo(
+  const pipelineOptions = useMemo(
+    () => pipelines || [],
+    [pipelines],
+  )
+  const runnablePipelines = useMemo(
     () => (pipelines || []).filter((pipeline) => pipeline.id !== pipelineId),
     [pipelineId, pipelines],
   )
@@ -272,6 +448,68 @@ export default function NodeConfigPanel({
   const connectedToolCount = useMemo(
     () => edges.filter((edge) => edge.source === nodeId && edge.sourceHandle === 'tool').length,
     [edges, nodeId],
+  )
+  const groupColor = useMemo(
+    () => normalizeGroupColor(localConfig.color),
+    [localConfig.color],
+  )
+  const pipelineToolArguments = useMemo(
+    () => normalizePipelineToolArguments(localConfig.arguments),
+    [localConfig.arguments],
+  )
+  const aggregateIDOverrides = useMemo(
+    () => normalizeAggregateIDOverrides(localConfig.idOverrides),
+    [localConfig.idOverrides],
+  )
+  const aggregateInputs = useMemo<AggregateInputConfig[]>(() => {
+    if (nodeType !== 'logic:aggregate') {
+      return []
+    }
+
+    const sourceMap = new Map<string, AggregateInputConfig>()
+
+    edges.forEach((edge) => {
+      if (edge.target !== nodeId || edge.sourceHandle === 'tool') {
+        return
+      }
+
+      const sourceNode = nodes.find((candidate) => candidate.id === edge.source)
+      const sourceData = sourceNode?.data && typeof sourceNode.data === 'object'
+        ? sourceNode.data as Record<string, unknown>
+        : undefined
+      const sourceHandle = typeof edge.sourceHandle === 'string' ? edge.sourceHandle.trim() : ''
+
+      const existing = sourceMap.get(edge.source)
+      if (existing) {
+        if (sourceHandle && !existing.sourceHandles.includes(sourceHandle)) {
+          existing.sourceHandles.push(sourceHandle)
+        }
+        return
+      }
+
+      sourceMap.set(edge.source, {
+        nodeId: edge.source,
+        label: typeof sourceData?.label === 'string' && sourceData.label.trim()
+          ? sourceData.label.trim()
+          : edge.source,
+        nodeType: typeof sourceData?.type === 'string' ? sourceData.type : '',
+        sourceHandles: sourceHandle ? [sourceHandle] : [],
+      })
+    })
+
+    return Array.from(sourceMap.values())
+  }, [edges, nodeId, nodeType, nodes])
+  const aggregateUnusedOverrideKeys = useMemo(
+    () => Object.keys(aggregateIDOverrides).filter((sourceId) => !aggregateInputs.some((source) => source.nodeId === sourceId)),
+    [aggregateIDOverrides, aggregateInputs],
+  )
+  const httpHeadersState = useMemo(
+    () => parseHeadersJSON(httpHeadersJSON),
+    [httpHeadersJSON],
+  )
+  const showErrorPolicy = useMemo(
+    () => supportsNodeErrorPolicy(nodeType),
+    [nodeType],
   )
 
   const handleSwitchConditionChange = (conditionId: string, key: keyof SwitchConditionConfig, value: string) => {
@@ -295,6 +533,60 @@ export default function NodeConfigPanel({
       switchConditions.filter((condition) => condition.id !== conditionId),
     )
     onRemoveSourceHandles?.([conditionId])
+  }
+
+  const handleHTTPHeadersJSONChange = (value: string) => {
+    setHTTPHeadersJSON(value)
+    const parsed = parseHeadersJSON(value)
+    if (!parsed.error && parsed.value) {
+      handleConfigChange('headers', parsed.value)
+    }
+  }
+
+  const handlePipelineToolArgumentChange = (
+    index: number,
+    key: keyof PipelineToolArgumentConfig,
+    value: string | boolean,
+  ) => {
+    handleConfigChange(
+      'arguments',
+      pipelineToolArguments.map((argument, argumentIndex) => (
+        argumentIndex === index
+          ? { ...argument, [key]: value }
+          : argument
+      )),
+    )
+  }
+
+  const handlePipelineToolArgumentAdd = () => {
+    handleConfigChange('arguments', [...pipelineToolArguments, createPipelineToolArgument(pipelineToolArguments)])
+  }
+
+  const handlePipelineToolArgumentRemove = (index: number) => {
+    handleConfigChange(
+      'arguments',
+      pipelineToolArguments.filter((_, argumentIndex) => argumentIndex !== index),
+    )
+  }
+
+  const handleAggregateIDOverrideChange = (sourceNodeID: string, value: string) => {
+    const nextOverrides = { ...aggregateIDOverrides }
+    const alias = value.trim()
+
+    if (alias) {
+      nextOverrides[sourceNodeID] = alias
+    } else {
+      delete nextOverrides[sourceNodeID]
+    }
+
+    if (Object.keys(nextOverrides).length === 0) {
+      const { idOverrides: _removed, ...rest } = localConfig
+      setLocalConfig(rest)
+      onUpdate(rest)
+      return
+    }
+
+    handleConfigChange('idOverrides', nextOverrides)
   }
 
   return (
@@ -372,6 +664,63 @@ export default function NodeConfigPanel({
 
         {activeTab === 'config' && (
           <div className="space-y-4">
+            {showErrorPolicy && (
+              <div className="rounded-xl border border-border bg-bg-input/60 p-3">
+                <FieldLabel
+                  tooltip={(
+                    <>
+                      <p>
+                        <span className="font-medium text-text">Stop pipeline</span>
+                        {' '}
+                        keeps the current behavior and fails the run immediately.
+                      </p>
+                      <p>
+                        <span className="font-medium text-text">Continue and pass error</span>
+                        {' '}
+                        records this node as failed but forwards its current input plus
+                        {' '}
+                        <span className="font-mono text-slate-200">error</span>
+                        ,
+                        {' '}
+                        <span className="font-mono text-slate-200">errorMessage</span>
+                        ,
+                        {' '}
+                        <span className="font-mono text-slate-200">errorNodeId</span>
+                        ,
+                        {' '}
+                        <span className="font-mono text-slate-200">errorNodeType</span>
+                        ,
+                        and
+                        {' '}
+                        <span className="font-mono text-slate-200">failed</span>
+                        {' '}
+                        to the next node.
+                      </p>
+                    </>
+                  )}
+                >
+                  Error Handling
+                </FieldLabel>
+                <Select
+                  value={String(localConfig.errorPolicy ?? 'stop')}
+                  onChange={(e) => handleConfigChange('errorPolicy', e.target.value)}
+                >
+                  <option value="stop">Stop pipeline on error</option>
+                  <option value="continue">Continue and pass error</option>
+                </Select>
+                <p className="mt-2 text-xs text-text-muted">
+                  Use a downstream condition node if you want to branch on
+                  {' '}
+                  <span className="font-mono text-text">input.failed</span>
+                  {' '}
+                  or
+                  {' '}
+                  <span className="font-mono text-text">input.error</span>
+                  .
+                </p>
+              </div>
+            )}
+
             {showClusterSelect && (
               <div>
                 <Label>Cluster</Label>
@@ -381,6 +730,23 @@ export default function NodeConfigPanel({
                 >
                   <option value="">Select cluster</option>
                   {clusters?.map((cluster) => (
+                    <option key={cluster.id} value={cluster.id}>
+                      {cluster.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {showKubernetesClusterSelect && (
+              <div>
+                <Label>Kubernetes Cluster</Label>
+                <Select
+                  value={(localConfig.clusterId as string) || ''}
+                  onChange={(e) => handleConfigChange('clusterId', e.target.value)}
+                >
+                  <option value="">Select cluster</option>
+                  {kubernetesClusters?.map((cluster) => (
                     <option key={cluster.id} value={cluster.id}>
                       {cluster.name}
                     </option>
@@ -419,7 +785,23 @@ export default function NodeConfigPanel({
             ) : nodeType === 'action:proxmox_list_workloads' || nodeType === 'tool:proxmox_list_workloads' ? (
               <>
                 <div>
-                  <Label>{nodeType === 'tool:proxmox_list_workloads' ? 'Default Node Filter' : 'Node Filter'}</Label>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>Optional node name to limit workload results to a single Proxmox node.</p>
+                        {nodeType === 'tool:proxmox_list_workloads' && (
+                          <p>
+                            The agent can override this default by passing
+                            {' '}
+                            <span className="font-mono text-slate-200">node</span>
+                            .
+                          </p>
+                        )}
+                      </>
+                    )}
+                  >
+                    {nodeType === 'tool:proxmox_list_workloads' ? 'Default Node Filter' : 'Node Filter'}
+                  </FieldLabel>
                   <TemplateInput
                     value={(localConfig.node as string) || ''}
                     onChange={(e) => handleConfigChange('node', e.target.value)}
@@ -427,16 +809,25 @@ export default function NodeConfigPanel({
                     suggestions={templateSuggestions}
                   />
                 </div>
-                {nodeType === 'tool:proxmox_list_workloads' && (
-                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                    The agent can optionally pass a <span className="font-mono text-text">node</span> argument to override this default filter.
-                  </div>
-                )}
               </>
             ) : nodeType === 'action:vm_start' || nodeType === 'action:vm_stop' || nodeType === 'tool:vm_start' || nodeType === 'tool:vm_stop' ? (
               <>
                 <div>
-                  <Label>{isToolNode ? 'Default Proxmox Node' : 'Proxmox Node'}</Label>
+                  <FieldLabel
+                    tooltip={isToolNode ? (
+                      <>
+                        <p>This value acts as the default Proxmox node for the tool.</p>
+                        <p>
+                          The agent can still override it with
+                          {' '}
+                          <span className="font-mono text-slate-200">node</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Proxmox node that hosts the target VM.'}
+                  >
+                    {isToolNode ? 'Default Proxmox Node' : 'Proxmox Node'}
+                  </FieldLabel>
                   <TemplateInput
                     value={(localConfig.node as string) || ''}
                     onChange={(e) => handleConfigChange('node', e.target.value)}
@@ -445,7 +836,21 @@ export default function NodeConfigPanel({
                   />
                 </div>
                 <div>
-                  <Label>{isToolNode ? 'Default VM ID' : 'VM ID'}</Label>
+                  <FieldLabel
+                    tooltip={isToolNode ? (
+                      <>
+                        <p>This value acts as the default VM id for the tool.</p>
+                        <p>
+                          The agent can still override it with
+                          {' '}
+                          <span className="font-mono text-slate-200">vmid</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Target virtual machine id.'}
+                  >
+                    {isToolNode ? 'Default VM ID' : 'VM ID'}
+                  </FieldLabel>
                   <Input
                     type="number"
                     value={(localConfig.vmid as number) || ''}
@@ -453,16 +858,25 @@ export default function NodeConfigPanel({
                     placeholder="e.g., 100"
                   />
                 </div>
-                {isToolNode && (
-                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                    The agent can provide <span className="font-mono text-text">node</span> and <span className="font-mono text-text">vmid</span> when calling this tool. Any values here act as defaults.
-                  </div>
-                )}
               </>
             ) : nodeType === 'action:vm_clone' || nodeType === 'tool:vm_clone' ? (
               <>
                 <div>
-                  <Label>{isToolNode ? 'Default Proxmox Node' : 'Proxmox Node'}</Label>
+                  <FieldLabel
+                    tooltip={isToolNode ? (
+                      <>
+                        <p>This value acts as the default source node for the clone tool.</p>
+                        <p>
+                          The agent can override it with
+                          {' '}
+                          <span className="font-mono text-slate-200">node</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Node that hosts the source VM.'}
+                  >
+                    {isToolNode ? 'Default Proxmox Node' : 'Proxmox Node'}
+                  </FieldLabel>
                   <TemplateInput
                     value={(localConfig.node as string) || ''}
                     onChange={(e) => handleConfigChange('node', e.target.value)}
@@ -471,7 +885,21 @@ export default function NodeConfigPanel({
                   />
                 </div>
                 <div>
-                  <Label>{isToolNode ? 'Default Source VM ID' : 'Source VM ID'}</Label>
+                  <FieldLabel
+                    tooltip={isToolNode ? (
+                      <>
+                        <p>This value acts as the default source VM id for the clone tool.</p>
+                        <p>
+                          The agent can override it with
+                          {' '}
+                          <span className="font-mono text-slate-200">vmid</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'VM id of the source machine to clone.'}
+                  >
+                    {isToolNode ? 'Default Source VM ID' : 'Source VM ID'}
+                  </FieldLabel>
                   <Input
                     type="number"
                     value={(localConfig.vmid as number) || ''}
@@ -480,7 +908,21 @@ export default function NodeConfigPanel({
                   />
                 </div>
                 <div>
-                  <Label>{isToolNode ? 'Default New VM Name' : 'New VM Name'}</Label>
+                  <FieldLabel
+                    tooltip={isToolNode ? (
+                      <>
+                        <p>This value acts as the default name for the new VM clone.</p>
+                        <p>
+                          The agent can override it with
+                          {' '}
+                          <span className="font-mono text-slate-200">newName</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Name for the newly created VM clone.'}
+                  >
+                    {isToolNode ? 'Default New VM Name' : 'New VM Name'}
+                  </FieldLabel>
                   <TemplateInput
                     value={(localConfig.newName as string) || ''}
                     onChange={(e) => handleConfigChange('newName', e.target.value)}
@@ -489,7 +931,21 @@ export default function NodeConfigPanel({
                   />
                 </div>
                 <div>
-                  <Label>{isToolNode ? 'Default New VM ID' : 'New VM ID'}</Label>
+                  <FieldLabel
+                    tooltip={isToolNode ? (
+                      <>
+                        <p>This value acts as the default id for the new VM clone.</p>
+                        <p>
+                          The agent can override it with
+                          {' '}
+                          <span className="font-mono text-slate-200">newId</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Numeric id for the newly created VM clone.'}
+                  >
+                    {isToolNode ? 'Default New VM ID' : 'New VM ID'}
+                  </FieldLabel>
                   <Input
                     type="number"
                     value={(localConfig.newId as number) || ''}
@@ -497,16 +953,34 @@ export default function NodeConfigPanel({
                     placeholder="e.g., 200"
                   />
                 </div>
-                {isToolNode && (
-                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                    The agent can override <span className="font-mono text-text">node</span>, <span className="font-mono text-text">vmid</span>, <span className="font-mono text-text">newName</span>, and <span className="font-mono text-text">newId</span> when it calls this tool.
-                  </div>
-                )}
               </>
             ) : nodeType === 'action:http' || nodeType === 'tool:http' ? (
               <>
                 <div>
-                  <Label>{nodeType === 'tool:http' ? 'Default URL' : 'URL'}</Label>
+                  <FieldLabel
+                    tooltip={nodeType === 'tool:http' ? (
+                      <>
+                        <p>Configured request values act as defaults for the tool.</p>
+                        <p>
+                          The agent can override
+                          {' '}
+                          <span className="font-mono text-slate-200">url</span>
+                          ,
+                          {' '}
+                          <span className="font-mono text-slate-200">method</span>
+                          ,
+                          {' '}
+                          <span className="font-mono text-slate-200">headers</span>
+                          , and
+                          {' '}
+                          <span className="font-mono text-slate-200">body</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Target URL for this HTTP request.'}
+                  >
+                    {nodeType === 'tool:http' ? 'Default URL' : 'URL'}
+                  </FieldLabel>
                   <TemplateInput
                     value={(localConfig.url as string) || ''}
                     onChange={(e) => handleConfigChange('url', e.target.value)}
@@ -539,16 +1013,60 @@ export default function NodeConfigPanel({
                     suggestions={templateSuggestions}
                   />
                 </div>
-                {nodeType === 'tool:http' && (
-                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                    The agent can pass <span className="font-mono text-text">url</span>, <span className="font-mono text-text">method</span>, <span className="font-mono text-text">headers</span>, and <span className="font-mono text-text">body</span>. Values here act as defaults.
-                  </div>
-                )}
+                <div>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>Provide headers as a JSON object.</p>
+                        <p>
+                          Example:
+                          {' '}
+                          <span className="font-mono text-slate-200">{'{"Authorization":"Bearer ...","X-Trace":"abc"}'}</span>
+                        </p>
+                      </>
+                    )}
+                  >
+                    {nodeType === 'tool:http' ? 'Default Headers JSON' : 'Headers JSON'}
+                  </FieldLabel>
+                  <TemplateTextarea
+                    value={httpHeadersJSON}
+                    onChange={(e) => handleHTTPHeadersJSONChange(e.target.value)}
+                    placeholder='{"Authorization":"Bearer ...","X-Trace":"abc"}'
+                    rows={4}
+                    className="font-mono text-xs"
+                    suggestions={templateSuggestions}
+                  />
+                  {httpHeadersState.error && (
+                    <p className="mt-2 text-xs text-red-400">
+                      {httpHeadersState.error}
+                    </p>
+                  )}
+                </div>
               </>
             ) : nodeType === 'action:shell_command' || nodeType === 'tool:shell_command' ? (
               <>
                 <div>
-                  <Label>{nodeType === 'tool:shell_command' ? 'Default Command' : 'Command'}</Label>
+                  <FieldLabel
+                    tooltip={nodeType === 'tool:shell_command' ? (
+                      <>
+                        <p>Configured values act as defaults for the tool.</p>
+                        <p>
+                          The agent can override
+                          {' '}
+                          <span className="font-mono text-slate-200">command</span>
+                          ,
+                          {' '}
+                          <span className="font-mono text-slate-200">workingDirectory</span>
+                          , and
+                          {' '}
+                          <span className="font-mono text-slate-200">timeoutSeconds</span>
+                          .
+                        </p>
+                      </>
+                    ) : 'Runs a local command in the workspace and returns stdout, stderr, exit code, and timing information.'}
+                  >
+                    {nodeType === 'tool:shell_command' ? 'Default Command' : 'Command'}
+                  </FieldLabel>
                   <TemplateTextarea
                     value={(localConfig.command as string) || ''}
                     onChange={(e) => handleConfigChange('command', e.target.value)}
@@ -576,15 +1094,6 @@ export default function NodeConfigPanel({
                     onChange={(e) => handleConfigChange('timeoutSeconds', parseInt(e.target.value, 10) || 60)}
                   />
                 </div>
-                {nodeType === 'tool:shell_command' ? (
-                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                    The agent can pass <span className="font-mono text-text">command</span>, <span className="font-mono text-text">workingDirectory</span>, and <span className="font-mono text-text">timeoutSeconds</span>. Values here act as defaults.
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                    Runs a local shell command during pipeline execution and returns stdout, stderr, exit code, and timing information.
-                  </div>
-                )}
               </>
             ) : nodeType === 'action:channel_send_message' ? (
               <>
@@ -608,13 +1117,120 @@ export default function NodeConfigPanel({
                   />
                 </div>
               </>
+            ) : nodeType === 'action:channel_edit_message' ? (
+              <>
+                <div>
+                  <FieldLabel
+                    tooltip="Optional contact ID or chat ID. Leave empty to edit the current triggering user's chat."
+                  >
+                    Recipient
+                  </FieldLabel>
+                  <TemplateInput
+                    value={(localConfig.recipient as string) || ''}
+                    onChange={(e) => handleConfigChange('recipient', e.target.value)}
+                    placeholder="Optional contact ID or chat ID"
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+                <div>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>Message ID to edit.</p>
+                        <p>
+                          Leave this empty to reuse a prior
+                          {' '}
+                          <span className="font-mono text-slate-200">message_id</span>
+                          {' '}
+                          or
+                          {' '}
+                          <span className="font-mono text-slate-200">response.message_id</span>
+                          {' '}
+                          from upstream channel nodes.
+                        </p>
+                      </>
+                    )}
+                  >
+                    Message ID
+                  </FieldLabel>
+                  <TemplateInput
+                    value={(localConfig.messageId as string) || ''}
+                    onChange={(e) => handleConfigChange('messageId', e.target.value)}
+                    placeholder="Optional explicit message ID"
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+                <div>
+                  <FieldLabel
+                    tooltip="Replacement text for the existing message."
+                  >
+                    Message
+                  </FieldLabel>
+                  <TemplateTextarea
+                    value={(localConfig.message as string) || ''}
+                    onChange={(e) => handleConfigChange('message', e.target.value)}
+                    placeholder="Write the updated message text"
+                    rows={6}
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+              </>
+            ) : nodeType === 'action:channel_reply_message' ? (
+              <>
+                <div>
+                  <FieldLabel
+                    tooltip="Optional contact ID or chat ID. Leave empty to reuse the current triggering user's chat."
+                  >
+                    Recipient
+                  </FieldLabel>
+                  <TemplateInput
+                    value={(localConfig.recipient as string) || ''}
+                    onChange={(e) => handleConfigChange('recipient', e.target.value)}
+                    placeholder="Optional contact ID or chat ID"
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+                <div>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>Message ID to reply to.</p>
+                        <p>
+                          Leave this empty to reuse the current or upstream
+                          {' '}
+                          <span className="font-mono text-slate-200">message_id</span>
+                          {' '}
+                          from a channel trigger or channel action output.
+                        </p>
+                      </>
+                    )}
+                  >
+                    Reply To Message ID
+                  </FieldLabel>
+                  <TemplateInput
+                    value={(localConfig.replyToMessageId as string) || ''}
+                    onChange={(e) => handleConfigChange('replyToMessageId', e.target.value)}
+                    placeholder="Optional explicit message ID"
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+                <div>
+                  <FieldLabel
+                    tooltip="Text to send as a new reply message."
+                  >
+                    Message
+                  </FieldLabel>
+                  <TemplateTextarea
+                    value={(localConfig.message as string) || ''}
+                    onChange={(e) => handleConfigChange('message', e.target.value)}
+                    placeholder="Write the reply text"
+                    rows={6}
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+              </>
             ) : nodeType === 'action:channel_send_and_wait' || nodeType === 'tool:channel_send_and_wait' ? (
               <>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  {nodeType === 'tool:channel_send_and_wait'
-                    ? 'The agent can message a connected user and pause until that user replies. Matching replies are routed back into this tool instead of triggering other channel pipelines.'
-                    : 'This node sends a message to a connected user, then waits until that same user replies or the timeout is reached.'}
-                </div>
                 <div>
                   <Label>{nodeType === 'tool:channel_send_and_wait' ? 'Default Recipient' : 'Recipient'}</Label>
                   <TemplateInput
@@ -625,7 +1241,18 @@ export default function NodeConfigPanel({
                   />
                 </div>
                 <div>
-                  <Label>{nodeType === 'tool:channel_send_and_wait' ? 'Default Message' : 'Message'}</Label>
+                  <FieldLabel
+                    tooltip={nodeType === 'tool:channel_send_and_wait'
+                      ? (
+                        <>
+                          <p>The agent can message a connected user and pause until that user replies.</p>
+                          <p>Matching replies are routed back into this tool instead of triggering other channel pipelines.</p>
+                        </>
+                      )
+                      : 'This node sends a message to a connected user, then waits until that same user replies or the timeout is reached.'}
+                  >
+                    {nodeType === 'tool:channel_send_and_wait' ? 'Default Message' : 'Message'}
+                  </FieldLabel>
                   <TemplateTextarea
                     value={(localConfig.message as string) || ''}
                     onChange={(e) => handleConfigChange('message', e.target.value)}
@@ -645,6 +1272,44 @@ export default function NodeConfigPanel({
                   />
                 </div>
               </>
+            ) : kubernetesNodeTypes.has(nodeType) ? (
+              <KubernetesNodeConfigSection
+                nodeType={nodeType}
+                localConfig={localConfig}
+                onConfigChange={handleConfigChange}
+                suggestions={templateSuggestions}
+                isToolNode={isToolNode}
+              />
+            ) : nodeType === 'action:pipeline_get' ? (
+              <>
+                <div>
+                  <Label>Pipeline</Label>
+                  <Select
+                    value={(localConfig.pipelineId as string) || ''}
+                    onChange={(e) => handleConfigChange('pipelineId', e.target.value)}
+                  >
+                    <option value="">Select pipeline</option>
+                    {pipelineOptions.map((pipeline) => (
+                      <option key={pipeline.id} value={pipeline.id}>
+                        {pipeline.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <label className="flex items-start gap-3 rounded-lg border border-border bg-bg-input px-3 py-2">
+                  <Checkbox
+                    checked={Boolean(localConfig.includeDefinition ?? true)}
+                    onChange={(e) => handleConfigChange('includeDefinition', e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text">Include full definition</div>
+                    <div className="mt-1 text-xs text-text-muted">
+                      Include nodes, edges, and viewport in the returned pipeline data.
+                    </div>
+                  </div>
+                </label>
+              </>
             ) : nodeType === 'action:pipeline_run' ? (
               <>
                 <div>
@@ -654,7 +1319,7 @@ export default function NodeConfigPanel({
                     onChange={(e) => handleConfigChange('pipelineId', e.target.value)}
                   >
                     <option value="">Select pipeline</option>
-                    {availablePipelines.map((pipeline) => (
+                    {runnablePipelines.map((pipeline) => (
                       <option key={pipeline.id} value={pipeline.id}>
                         {pipeline.name}
                       </option>
@@ -695,42 +1360,31 @@ export default function NodeConfigPanel({
               </div>
             ) : nodeType === 'tool:pipeline_list' ? (
               <div className="space-y-3">
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  This tool exposes the list of available pipelines to a connected agent node.
-                </div>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-xs text-text-muted">
-                  The agent can optionally pass <span className="font-mono text-text">pipelineId</span>, <span className="font-mono text-text">pipelineName</span>, and <span className="font-mono text-text">includeDefinition</span> when it needs full nodes, edges, and viewport for editing.
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
+                  <span>No additional configuration.</span>
+                  <HelpTooltip
+                    content={(
+                      <>
+                        <p>This tool exposes the list of available pipelines to a connected agent node.</p>
+                        <p>
+                          The agent can optionally pass
+                          {' '}
+                          <span className="font-mono text-slate-200">pipelineId</span>
+                          ,
+                          {' '}
+                          <span className="font-mono text-slate-200">pipelineName</span>
+                          , and
+                          {' '}
+                          <span className="font-mono text-slate-200">includeDefinition</span>
+                          {' '}
+                          when it needs full nodes, edges, and viewport for editing.
+                        </p>
+                      </>
+                    )}
+                  />
                 </div>
               </div>
-            ) : pipelineMutationToolNodeTypes.has(nodeType) ? (
-              <>
-                <div>
-                  <Label>Tool Name</Label>
-                  <Input
-                    value={(localConfig.toolName as string) || ''}
-                    onChange={(e) => handleConfigChange('toolName', e.target.value)}
-                    placeholder="Optional custom function name"
-                  />
-                </div>
-                <div>
-                  <Label>Tool Description</Label>
-                  <TemplateTextarea
-                    value={(localConfig.toolDescription as string) || ''}
-                    onChange={(e) => handleConfigChange('toolDescription', e.target.value)}
-                    placeholder="Explain when the model should use this tool."
-                    rows={4}
-                    suggestions={templateSuggestions}
-                  />
-                </div>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  {nodeType === 'tool:pipeline_create'
-                    ? 'The connected agent can create new pipelines with a name, description, status, nodes, edges, and an optional viewport.'
-                    : nodeType === 'tool:pipeline_update'
-                    ? 'The connected agent can update an existing pipeline by pipelineId or exact pipelineName. Only the fields it sends will change.'
-                    : 'The connected agent can delete a pipeline by pipelineId or exact pipelineName.'}
-                </div>
-              </>
-            ) : nodeType === 'tool:pipeline_run' ? (
+            ) : nodeType === 'tool:pipeline_get' ? (
               <>
                 <div>
                   <Label>Tool Name</Label>
@@ -770,20 +1424,216 @@ export default function NodeConfigPanel({
                     onChange={(e) => handleConfigChange('pipelineId', e.target.value)}
                   >
                     <option value="">{Boolean(localConfig.allowModelPipelineId) ? 'Optional default pipeline' : 'Select pipeline'}</option>
-                    {availablePipelines.map((pipeline) => (
+                    {pipelineOptions.map((pipeline) => (
                       <option key={pipeline.id} value={pipeline.id}>
                         {pipeline.name}
                       </option>
                     ))}
                   </Select>
                 </div>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  The connected agent can call this tool with a <span className="font-mono text-text">params</span> object. The target pipeline will receive those values as manual-run input, and a <span className="font-medium text-text">Return</span> node will send data back to the agent.
-                  {Boolean(localConfig.allowModelPipelineId) && (
-                    <span> When enabled, the model can also send a <span className="font-mono text-text">pipelineId</span> argument.</span>
+                <label className="flex items-start gap-3 rounded-lg border border-border bg-bg-input px-3 py-2">
+                  <Checkbox
+                    checked={Boolean(localConfig.includeDefinition ?? true)}
+                    onChange={(e) => handleConfigChange('includeDefinition', e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text">Include full definition</div>
+                    <div className="mt-1 text-xs text-text-muted">
+                      Return nodes, edges, and viewport together with the pipeline metadata.
+                    </div>
+                  </div>
+                </label>
+              </>
+            ) : pipelineMutationToolNodeTypes.has(nodeType) ? (
+              <>
+                <div>
+                  <Label>Tool Name</Label>
+                  <Input
+                    value={(localConfig.toolName as string) || ''}
+                    onChange={(e) => handleConfigChange('toolName', e.target.value)}
+                    placeholder="Optional custom function name"
+                  />
+                </div>
+                <div>
+                  <FieldLabel
+                    tooltip={nodeType === 'tool:pipeline_create'
+                      ? 'Use this description to tell the model when it should create a new pipeline.'
+                      : nodeType === 'tool:pipeline_update'
+                      ? 'Use this description to tell the model when it should update an existing pipeline.'
+                      : 'Use this description to tell the model when it should delete a pipeline.'}
+                  >
+                    Tool Description
+                  </FieldLabel>
+                  <TemplateTextarea
+                    value={(localConfig.toolDescription as string) || ''}
+                    onChange={(e) => handleConfigChange('toolDescription', e.target.value)}
+                    placeholder="Explain when the model should use this tool."
+                    rows={4}
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+              </>
+            ) : nodeType === 'tool:pipeline_run' ? (
+              <>
+                <div>
+                  <Label>Tool Name</Label>
+                  <Input
+                    value={(localConfig.toolName as string) || ''}
+                    onChange={(e) => handleConfigChange('toolName', e.target.value)}
+                    placeholder="Optional custom function name"
+                  />
+                </div>
+                <div>
+                  <FieldLabel
+                    tooltip="Use this description to explain when the model should call this tool. The tool can always pass a params object as manual-run input."
+                  >
+                    Tool Description
+                  </FieldLabel>
+                  <TemplateTextarea
+                    value={(localConfig.toolDescription as string) || ''}
+                    onChange={(e) => handleConfigChange('toolDescription', e.target.value)}
+                    placeholder="Explain when the model should use this tool."
+                    rows={4}
+                    suggestions={templateSuggestions}
+                  />
+                </div>
+                <label className="flex items-start gap-3 rounded-lg border border-border bg-bg-input px-3 py-2">
+                  <Checkbox
+                    checked={Boolean(localConfig.allowModelPipelineId)}
+                    onChange={(e) => handleConfigChange('allowModelPipelineId', e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text">Let model choose pipeline ID</div>
+                    <div className="mt-1 text-xs text-text-muted">
+                      Expose a <span className="font-mono text-text">pipelineId</span> argument in the tool schema so the model can select the target pipeline dynamically.
+                    </div>
+                  </div>
+                </label>
+                <div>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>The tool always runs a pipeline manually and can pass a top-level <span className="font-mono text-slate-200">params</span> object as execution input.</p>
+                        <p>If the called pipeline reaches a Return node, that returned value is sent back to the agent.</p>
+                      </>
+                    )}
+                  >
+                    {Boolean(localConfig.allowModelPipelineId) ? 'Default Pipeline' : 'Pipeline'}
+                  </FieldLabel>
+                  <Select
+                    value={(localConfig.pipelineId as string) || ''}
+                    onChange={(e) => handleConfigChange('pipelineId', e.target.value)}
+                  >
+                    <option value="">{Boolean(localConfig.allowModelPipelineId) ? 'Optional default pipeline' : 'Select pipeline'}</option>
+                    {runnablePipelines.map((pipeline) => (
+                      <option key={pipeline.id} value={pipeline.id}>
+                        {pipeline.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-3 rounded-xl border border-border bg-bg-input/70 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Label className="mb-0">Additional Arguments</Label>
+                        <HelpTooltip
+                          content={(
+                            <>
+                              <p>Each argument becomes a tool parameter the model can send.</p>
+                              <p>
+                                Values are passed into the called pipeline as
+                                {' '}
+                                <span className="font-mono text-slate-200">{'{{arguments.name}}'}</span>
+                                .
+                              </p>
+                            </>
+                          )}
+                        />
+                      </div>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={handlePipelineToolArgumentAdd}>
+                      <Plus className="w-4 h-4" />
+                      Add parameter
+                    </Button>
+                  </div>
+                  {pipelineToolArguments.length > 0 ? (
+                    pipelineToolArguments.map((argument, index) => (
+                      <div key={`${argument.name}-${index}`} className="space-y-3 rounded-xl border border-border bg-bg-overlay/70 p-3">
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <Label>Parameter Name</Label>
+                            <Input
+                              value={argument.name}
+                              onChange={(e) => handlePipelineToolArgumentChange(index, 'name', e.target.value)}
+                              placeholder="argument_name"
+                            />
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-6"
+                            onClick={() => handlePipelineToolArgumentRemove(index)}
+                            title="Remove parameter"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </Button>
+                        </div>
+                        <div>
+                          <Label>Description</Label>
+                          <Input
+                            value={argument.description}
+                            onChange={(e) => handlePipelineToolArgumentChange(index, 'description', e.target.value)}
+                            placeholder="Explain what the model should pass here."
+                          />
+                        </div>
+                        <label className="flex items-start gap-3 rounded-lg border border-border bg-bg-input px-3 py-2">
+                          <Checkbox
+                            checked={argument.required}
+                            onChange={(e) => handlePipelineToolArgumentChange(index, 'required', e.target.checked)}
+                            className="mt-0.5"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-text">Required parameter</div>
+                            <div className="mt-1 text-xs text-text-muted">
+                              The tool call must include this parameter.
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border bg-bg-overlay/70 px-3 py-2 text-sm text-text-muted">
+                      No additional parameters yet. Use the button above to expose named arguments to the model.
+                    </div>
                   )}
                 </div>
               </>
+            ) : nodeType === 'visual:group' ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
+                  Groups are visual only. Set a title in the General tab, and choose the box color here.
+                </div>
+                <div>
+                  <Label>Group Color</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={groupColor}
+                      onChange={(e) => handleConfigChange('color', e.target.value)}
+                      className="h-11 w-14 cursor-pointer rounded-lg border border-border bg-bg-input p-1"
+                    />
+                    <Input
+                      value={groupColor}
+                      onChange={(e) => handleConfigChange('color', normalizeGroupColor(e.target.value))}
+                      placeholder={DEFAULT_GROUP_COLOR}
+                      className="font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
             ) : nodeType === 'logic:condition' ? (
               <div>
                 <ExpressionLabel />
@@ -845,11 +1695,26 @@ export default function NodeConfigPanel({
               </div>
             ) : nodeType === 'logic:merge' ? (
               <>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  Merge waits for every connected upstream branch, then combines object outputs into one payload. Downstream nodes get the merged fields directly, plus a <span className="font-mono text-text">merged</span> object and <span className="font-mono text-text">entries</span> metadata.
-                </div>
                 <div>
-                  <Label>Mode</Label>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>Merge waits for every connected upstream branch, then combines object outputs into one payload.</p>
+                        <p>
+                          Downstream nodes get the merged fields directly, plus
+                          {' '}
+                          <span className="font-mono text-slate-200">merged</span>
+                          {' '}
+                          and
+                          {' '}
+                          <span className="font-mono text-slate-200">entries</span>
+                          .
+                        </p>
+                      </>
+                    )}
+                  >
+                    Mode
+                  </FieldLabel>
                   <Select
                     value={(localConfig.mode as string) || 'shallow'}
                     onChange={(e) => handleConfigChange('mode', e.target.value)}
@@ -861,22 +1726,106 @@ export default function NodeConfigPanel({
               </>
             ) : nodeType === 'logic:aggregate' ? (
               <div className="space-y-3">
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  Aggregate waits for every connected upstream branch and outputs:
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
+                  <span>Aggregate waits for every connected upstream branch.</span>
+                  <HelpTooltip
+                    content={(
+                      <>
+                        <p><span className="font-mono text-slate-200">items</span>: ordered list of upstream outputs.</p>
+                        <p><span className="font-mono text-slate-200">entries</span>: upstream outputs with node ids, labels, and types.</p>
+                        <p><span className="font-mono text-slate-200">byNodeId</span>: upstream outputs keyed by the resolved output id.</p>
+                        <p>
+                          <span className="font-mono text-slate-200">idOverrides</span>
+                          {' '}
+                          lets you rename those source ids in the aggregate output without changing the actual graph node ids.
+                        </p>
+                      </>
+                    )}
+                  />
                 </div>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-xs text-text-muted">
-                  <div><span className="font-mono text-text">items</span>: ordered list of upstream outputs</div>
-                  <div className="mt-1"><span className="font-mono text-text">entries</span>: upstream outputs with node ids, labels, and types</div>
-                  <div className="mt-1"><span className="font-mono text-text">byNodeId</span>: upstream outputs keyed by source node id</div>
-                </div>
+                {aggregateInputs.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-bg-overlay/70 px-3 py-2 text-sm text-text-muted">
+                    Connect upstream nodes to optionally rewrite their ids in
+                    {' '}
+                    <span className="font-mono text-text">entries</span>
+                    {' '}
+                    and
+                    {' '}
+                    <span className="font-mono text-text">byNodeId</span>
+                    .
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <FieldLabel
+                      tooltip={(
+                        <>
+                          <p>These overrides only affect the aggregate output payload.</p>
+                          <p>
+                            The actual connected node ids stay the same, and overridden entries keep their real id in
+                            {' '}
+                            <span className="font-mono text-slate-200">originalNodeId</span>
+                            .
+                          </p>
+                        </>
+                      )}
+                    >
+                      Output ID Overrides
+                    </FieldLabel>
+                    {aggregateInputs.map((source) => (
+                      <div key={source.nodeId} className="space-y-3 rounded-xl border border-border bg-bg-input/80 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-text">{source.label}</div>
+                            <div className="mt-1 text-xs text-text-dimmed">
+                              <span className="font-mono text-text">{source.nodeId}</span>
+                              {source.nodeType && (
+                                <>
+                                  {' '}
+                                  · {source.nodeType}
+                                </>
+                              )}
+                              {source.sourceHandles.length > 0 && (
+                                <>
+                                  {' '}
+                                  · handles: {source.sourceHandles.join(', ')}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <Label>Output ID</Label>
+                          <Input
+                            value={aggregateIDOverrides[source.nodeId] || ''}
+                            onChange={(e) => handleAggregateIDOverrideChange(source.nodeId, e.target.value)}
+                            placeholder={source.nodeId}
+                            className="font-mono"
+                          />
+                          <p className="mt-1 text-xs text-text-dimmed">
+                            Leave empty to keep
+                            {' '}
+                            <span className="font-mono text-text">{source.nodeId}</span>
+                            .
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {aggregateUnusedOverrideKeys.length > 0 && (
+                  <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-xs text-text-dimmed">
+                    Unused overrides are being kept for disconnected inputs:
+                    {' '}
+                    <span className="font-mono text-text">{aggregateUnusedOverrideKeys.join(', ')}</span>
+                  </div>
+                )}
               </div>
             ) : nodeType === 'logic:return' ? (
               <>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  This node stops the pipeline and returns data to the caller. Leave the value empty to return the full current input object.
-                </div>
                 <div>
-                  <Label>Return Value</Label>
+                  <FieldLabel tooltip="This node stops the pipeline and returns data to the caller. Leave the value empty to return the full current input object.">
+                    Return Value
+                  </FieldLabel>
                   <TemplateTextarea
                     value={(localConfig.value as string) || ''}
                     onChange={(e) => handleConfigChange('value', e.target.value)}
@@ -974,8 +1923,12 @@ export default function NodeConfigPanel({
                     ))}
                   </Select>
                 </div>
-                <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-muted">
-                  Connected tools: <span className="font-medium text-text">{connectedToolCount}</span>. Connect tool nodes from the blue pin on the bottom of the agent node to the top pin on each tool node to make them available during multi-turn execution.
+                <div className="flex items-center justify-between rounded-lg border border-border bg-bg-input px-3 py-2">
+                  <div className="flex items-center gap-2 text-sm text-text-muted">
+                    <span>Connected tools</span>
+                    <HelpTooltip content="Connect tool nodes from the blue pin on the bottom of the agent node to the top pin on each tool node to make them available during multi-turn execution." />
+                  </div>
+                  <span className="text-sm font-medium text-text">{connectedToolCount}</span>
                 </div>
                 <label className="flex items-start gap-3 rounded-lg border border-border bg-bg-input px-3 py-2">
                   <Checkbox
@@ -984,9 +1937,22 @@ export default function NodeConfigPanel({
                     className="mt-0.5"
                   />
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-text">Enable local skills</div>
-                    <div className="mt-1 text-xs text-text-muted">
-                      Adds the <span className="font-mono text-text">get_skill</span> tool to this agent and lets you insert <span className="font-mono text-text">{'{{skills}}'}</span> into the prompt.
+                    <div className="flex items-center gap-2 text-sm font-medium text-text">
+                      <span>Enable local skills</span>
+                      <HelpTooltip
+                        content={(
+                          <>
+                            <p>Adds the <span className="font-mono text-slate-200">get_skill</span> tool to this agent.</p>
+                            <p>
+                              It also lets you insert
+                              {' '}
+                              <span className="font-mono text-slate-200">{'{{skills}}'}</span>
+                              {' '}
+                              into the prompt.
+                            </p>
+                          </>
+                        )}
+                      />
                     </div>
                   </div>
                 </label>

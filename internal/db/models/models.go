@@ -14,6 +14,33 @@ type Cluster struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+type KubernetesCluster struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	SourceType       string    `json:"source_type"`
+	Kubeconfig       string    `json:"kubeconfig,omitempty"`
+	ContextName      string    `json:"context_name"`
+	DefaultNamespace string    `json:"default_namespace"`
+	Server           string    `json:"server"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type AppConfig struct {
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type User struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	Password  string    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type LLMProvider struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`

@@ -86,6 +86,7 @@ This is the only valid way to connect a `tool:*` node.
 - Tool nodes connect only from an `llm:agent` node's bottom `tool` handle
 - Never connect a `tool:*` node with a normal edge
 - Never use the `tool` handle to target anything except a `tool:*` node
+- Only attach mutating Kubernetes tool nodes when the user explicitly wants cluster writes or pod exec capability
 - The backend validates these rules and rejects invalid pipeline definitions
 - `logic:return` ends the pipeline and should not be treated like a normal fan-out node
 - For `logic:condition`, branch handles are:
@@ -115,8 +116,21 @@ Actions:
 - `action:vm_start`
 - `action:vm_stop`
 - `action:vm_clone`
+- `action:kubernetes_api_resources`
+- `action:kubernetes_list_resources`
+- `action:kubernetes_get_resource`
+- `action:kubernetes_apply_manifest`
+- `action:kubernetes_patch_resource`
+- `action:kubernetes_delete_resource`
+- `action:kubernetes_scale_resource`
+- `action:kubernetes_rollout_restart`
+- `action:kubernetes_rollout_status`
+- `action:kubernetes_pod_logs`
+- `action:kubernetes_pod_exec`
+- `action:kubernetes_events`
 - `action:channel_send_message`
 - `action:channel_send_and_wait`
+- `action:pipeline_get`
 - `action:pipeline_run`
 
 Logic:
@@ -142,11 +156,73 @@ Tool nodes:
 - `tool:vm_stop`
 - `tool:vm_clone`
 - `tool:pipeline_list`
+- `tool:pipeline_get`
 - `tool:pipeline_create`
 - `tool:pipeline_update`
 - `tool:pipeline_delete`
 - `tool:pipeline_run`
+- `tool:kubernetes_api_resources`
+- `tool:kubernetes_list_resources`
+- `tool:kubernetes_get_resource`
+- `tool:kubernetes_apply_manifest`
+- `tool:kubernetes_patch_resource`
+- `tool:kubernetes_delete_resource`
+- `tool:kubernetes_scale_resource`
+- `tool:kubernetes_rollout_restart`
+- `tool:kubernetes_rollout_status`
+- `tool:kubernetes_pod_logs`
+- `tool:kubernetes_pod_exec`
+- `tool:kubernetes_events`
 - `tool:channel_send_and_wait`
+
+## Kubernetes Patterns
+
+Common Kubernetes node config shape:
+
+- `clusterId` is required
+- `namespace` is optional and falls back to the cluster default namespace
+- For resource lookup and mutation nodes, set `apiVersion` plus either `kind` or `resource`
+- For single-resource operations, also set `name`
+- For collection delete/list operations, use `labelSelector` and/or `fieldSelector`
+- `action:kubernetes_apply_manifest` and `tool:kubernetes_apply_manifest` use `manifest`, optional `fieldManager`, and optional `force`
+
+Standard Kubernetes node outputs include:
+
+- `clusterId`
+- `clusterName`
+- `context`
+- `defaultNamespace`
+- `namespace`
+- `resourceRef` for operations that resolve a concrete resource or resource kind
+
+Operation payloads then add fields such as:
+
+- `resources` for API discovery
+- `items` and `count` for list/apply/events operations
+- `item` for get/patch/delete/scale/restart operations
+- `status` for rollout status
+- `logs` for pod logs
+- `result` for pod exec
+
+Read-heavy Kubernetes nodes:
+
+- `action:kubernetes_api_resources`
+- `action:kubernetes_list_resources`
+- `action:kubernetes_get_resource`
+- `action:kubernetes_rollout_status`
+- `action:kubernetes_pod_logs`
+- `action:kubernetes_events`
+- the matching `tool:kubernetes_*` variants
+
+Mutating Kubernetes nodes:
+
+- `action:kubernetes_apply_manifest`
+- `action:kubernetes_patch_resource`
+- `action:kubernetes_delete_resource`
+- `action:kubernetes_scale_resource`
+- `action:kubernetes_rollout_restart`
+- `action:kubernetes_pod_exec`
+- the matching `tool:kubernetes_*` variants
 
 ## Config Patterns
 
@@ -171,6 +247,69 @@ HTTP request:
   "enabled": true
 }
 ```
+
+Kubernetes list resources:
+
+```json
+{
+  "label": "K8s List Resources",
+  "type": "action:kubernetes_list_resources",
+  "config": {
+    "clusterId": "k8s-cluster-id",
+    "namespace": "production",
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "resource": "",
+    "labelSelector": "app=api",
+    "fieldSelector": "",
+    "allNamespaces": false,
+    "limit": 50
+  },
+  "enabled": true
+}
+```
+
+Kubernetes apply manifest:
+
+```json
+{
+  "label": "K8s Apply Manifest",
+  "type": "action:kubernetes_apply_manifest",
+  "config": {
+    "clusterId": "k8s-cluster-id",
+    "namespace": "production",
+    "manifest": "apiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: api\\nspec:\\n  replicas: 3",
+    "fieldManager": "automator",
+    "force": false
+  },
+  "enabled": true
+}
+```
+
+Run pipeline tool:
+
+```json
+{
+  "label": "Run Pipeline Tool",
+  "type": "tool:pipeline_run",
+  "config": {
+    "pipelineId": "pipeline-target-id",
+    "toolName": "run_support_pipeline",
+    "toolDescription": "Run the support pipeline and return its output.",
+    "allowModelPipelineId": false,
+    "arguments": [
+      {
+        "name": "ticket",
+        "description": "Ticket id to pass into the called pipeline as arguments.ticket",
+        "required": true
+      }
+    ]
+  },
+  "enabled": true
+}
+```
+
+Important: custom `tool:pipeline_run` arguments are delivered inside the called pipeline as `arguments.<name>`, so downstream templates can use values like `{{arguments.ticket}}`.
 
 Condition:
 
@@ -411,6 +550,12 @@ Connected tools:
 - `tool:pipeline_run`
 - `tool:pipeline_create`
 - `tool:pipeline_update`
+- `tool:kubernetes_list_resources`
+- `tool:kubernetes_get_resource`
+- `tool:kubernetes_pod_logs`
+- `tool:kubernetes_events`
+
+Only add mutating Kubernetes tools such as `tool:kubernetes_apply_manifest` or `tool:kubernetes_delete_resource` when the request clearly requires cluster changes.
 
 ## Decision Heuristics
 

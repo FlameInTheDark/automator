@@ -121,6 +121,52 @@ func TestEncryptor_DifferentCiphertextEachTime(t *testing.T) {
 	}
 }
 
+func TestEncryptor_DecryptCompatSupportsLegacyFormats(t *testing.T) {
+	encryptor, err := crypto.NewEncryptor("test-key-32-bytes-long!!12345678")
+	if err != nil {
+		t.Fatalf("NewEncryptor() error = %v", err)
+	}
+
+	encrypted, err := encryptor.Encrypt("secret-value")
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "prefixed ciphertext",
+			input: encrypted,
+			want:  "secret-value",
+		},
+		{
+			name:  "legacy unprefixed ciphertext",
+			input: strings.TrimPrefix(encrypted, "enc:"),
+			want:  "secret-value",
+		},
+		{
+			name:  "legacy plaintext",
+			input: `{"botToken":"abc123"}`,
+			want:  `{"botToken":"abc123"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := encryptor.DecryptCompat(tt.input)
+			if err != nil {
+				t.Fatalf("DecryptCompat() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("DecryptCompat() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEncryptor_DecryptInvalidData(t *testing.T) {
 	encryptor, err := crypto.NewEncryptor("test-key-32-bytes-long!!12345678")
 	if err != nil {

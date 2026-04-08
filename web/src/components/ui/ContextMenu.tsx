@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Search } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import Input from './Input'
@@ -108,15 +108,101 @@ function filterItems(items: ContextMenuItem[], query: string): ContextMenuItem[]
 interface MenuListProps {
   items: ContextMenuItem[]
   onClose: () => void
-  submenuDirection: 'left' | 'right'
 }
 
-function MenuList({ items, onClose, submenuDirection }: MenuListProps) {
+function clamp(value: number, min: number, max: number): number {
+  if (max < min) {
+    return min
+  }
+
+  return Math.max(min, Math.min(value, max))
+}
+
+function getClampedMenuPosition(
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): { left: number; top: number } {
+  return {
+    left: clamp(x, MENU_MARGIN, viewportWidth - menuWidth - MENU_MARGIN),
+    top: clamp(y, MENU_MARGIN, viewportHeight - menuHeight - MENU_MARGIN),
+  }
+}
+
+function MenuList({ items, onClose }: MenuListProps) {
   const [openIndex, setOpenIndex] = useState<number | null>(null)
+  const [submenuPosition, setSubmenuPosition] = useState<{ left: number; top: number } | null>(null)
+  const buttonRefs = useRef<Record<number, HTMLButtonElement | null>>({})
+  const submenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setOpenIndex(null)
   }, [items])
+
+  const updateSubmenuPosition = useCallback(() => {
+    if (openIndex === null || typeof window === 'undefined') {
+      setSubmenuPosition(null)
+      return
+    }
+
+    const trigger = buttonRefs.current[openIndex]
+    const submenu = submenuRef.current
+
+    if (!trigger || !submenu) {
+      return
+    }
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const submenuRect = submenu.getBoundingClientRect()
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const submenuWidth = submenuRect.width || MENU_WIDTH
+    const submenuHeight = submenuRect.height || 240
+
+    const openToRightX = triggerRect.right + 4
+    const openToLeftX = triggerRect.left - submenuWidth - 4
+    const fitsRight = openToRightX + submenuWidth + MENU_MARGIN <= viewportWidth
+    const fitsLeft = openToLeftX >= MENU_MARGIN
+
+    const left = fitsRight || (!fitsLeft && viewportWidth - triggerRect.right >= triggerRect.left)
+      ? clamp(openToRightX, MENU_MARGIN, viewportWidth - submenuWidth - MENU_MARGIN)
+      : clamp(openToLeftX, MENU_MARGIN, viewportWidth - submenuWidth - MENU_MARGIN)
+
+    const top = clamp(
+      triggerRect.top,
+      MENU_MARGIN,
+      viewportHeight - submenuHeight - MENU_MARGIN,
+    )
+
+    setSubmenuPosition((current) => (
+      current?.left === left && current?.top === top
+        ? current
+        : { left, top }
+    ))
+  }, [openIndex])
+
+  useLayoutEffect(() => {
+    updateSubmenuPosition()
+  }, [updateSubmenuPosition, items])
+
+  useEffect(() => {
+    if (openIndex === null || typeof window === 'undefined') {
+      return
+    }
+
+    const handleViewportChange = () => updateSubmenuPosition()
+
+    window.addEventListener('resize', handleViewportChange)
+    window.addEventListener('scroll', handleViewportChange, true)
+
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+      window.removeEventListener('scroll', handleViewportChange, true)
+    }
+  }, [openIndex, updateSubmenuPosition])
 
   return (
     <div className="py-1">
@@ -135,6 +221,9 @@ function MenuList({ items, onClose, submenuDirection }: MenuListProps) {
             onMouseEnter={() => setOpenIndex(hasChildren ? i : null)}
           >
             <button
+              ref={(element) => {
+                buttonRefs.current[i] = element
+              }}
               onClick={() => {
                 if (hasChildren) {
                   setOpenIndex((current) => (current === i ? null : i))
@@ -170,16 +259,16 @@ function MenuList({ items, onClose, submenuDirection }: MenuListProps) {
 
             {hasChildren && isOpen && (
               <div
-                className={cn(
-                  'absolute top-0 z-10 min-w-[240px] bg-bg-elevated border border-border rounded-lg shadow-2xl',
-                  submenuDirection === 'left' ? 'right-full mr-1' : 'left-full ml-1'
-                )}
+                ref={submenuRef}
+                className="fixed z-[60] min-w-[240px] max-h-[calc(100vh-24px)] bg-bg-elevated border border-border rounded-lg shadow-2xl overflow-hidden"
+                style={submenuPosition ?? { left: MENU_MARGIN, top: MENU_MARGIN }}
               >
-                <MenuList
-                  items={item.children ?? []}
-                  onClose={onClose}
-                  submenuDirection={submenuDirection}
-                />
+                <div className="max-h-[calc(100vh-24px)] overflow-y-auto">
+                  <MenuList
+                    items={item.children ?? []}
+                    onClose={onClose}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -201,6 +290,7 @@ export default function ContextMenu({
   const menuRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
+  const [menuPosition, setMenuPosition] = useState({ left: x, top: y })
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -230,18 +320,53 @@ export default function ContextMenu({
   }, [searchable, items])
 
   const filteredItems = useMemo(() => filterItems(items, query), [items, query])
+  const updateMenuPosition = useCallback(() => {
+    if (!menuRef.current || typeof window === 'undefined') {
+      return
+    }
 
-  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280
-  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 720
-  const safeX = Math.max(MENU_MARGIN, Math.min(x, viewportWidth - MENU_WIDTH - MENU_MARGIN))
-  const safeY = Math.max(MENU_MARGIN, Math.min(y, viewportHeight - 420))
-  const submenuDirection = safeX > viewportWidth - (MENU_WIDTH * 2) - (MENU_MARGIN * 2) ? 'left' : 'right'
+    const menuRect = menuRef.current.getBoundingClientRect()
+    const nextPosition = getClampedMenuPosition(
+      x,
+      y,
+      menuRect.width || MENU_WIDTH,
+      menuRect.height || 320,
+      window.innerWidth,
+      window.innerHeight,
+    )
+
+    setMenuPosition((current) => (
+      current.left === nextPosition.left && current.top === nextPosition.top
+        ? current
+        : nextPosition
+    ))
+  }, [x, y])
+
+  useLayoutEffect(() => {
+    updateMenuPosition()
+  }, [updateMenuPosition, filteredItems, searchable])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleViewportChange = () => updateMenuPosition()
+
+    window.addEventListener('resize', handleViewportChange)
+    window.addEventListener('scroll', handleViewportChange, true)
+
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+      window.removeEventListener('scroll', handleViewportChange, true)
+    }
+  }, [updateMenuPosition])
 
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[240px] bg-bg-elevated border border-border rounded-lg shadow-2xl animate-fade-in overflow-visible"
-      style={{ left: safeX, top: safeY }}
+      className="fixed z-50 min-w-[240px] max-h-[calc(100vh-24px)] bg-bg-elevated border border-border rounded-lg shadow-2xl animate-fade-in overflow-hidden flex flex-col"
+      style={{ left: menuPosition.left, top: menuPosition.top }}
     >
       {searchable && (
         <div className="px-2 pt-2 pb-1 border-b border-border">
@@ -260,11 +385,12 @@ export default function ContextMenu({
       )}
 
       {filteredItems.length > 0 ? (
-        <MenuList
-          items={filteredItems}
-          onClose={onClose}
-          submenuDirection={submenuDirection}
-        />
+        <div className="max-h-[calc(100vh-24px)] overflow-y-auto">
+          <MenuList
+            items={filteredItems}
+            onClose={onClose}
+          />
+        </div>
       ) : (
         <div className="px-3 py-4 text-sm text-text-dimmed">{emptyMessage}</div>
       )}

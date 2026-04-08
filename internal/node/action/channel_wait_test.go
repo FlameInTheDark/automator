@@ -28,16 +28,48 @@ func (s *stubChannelContactStore) GetByID(context.Context, string) (*models.Chan
 }
 
 type stubChannelSender struct {
-	channel *models.Channel
-	chatID  string
-	text    string
-	result  map[string]any
+	channel        *models.Channel
+	chatID         string
+	text           string
+	result         map[string]any
+	replyChannel   *models.Channel
+	replyChatID    string
+	replyMessageID string
+	replyText      string
+	replyResult    map[string]any
+	editChannel    *models.Channel
+	editChatID     string
+	editMessageID  string
+	editText       string
+	editResult     map[string]any
 }
 
 func (s *stubChannelSender) SendMessage(_ context.Context, channel *models.Channel, chatID string, text string) (map[string]any, error) {
 	s.channel = channel
 	s.chatID = chatID
 	s.text = text
+	return s.result, nil
+}
+
+func (s *stubChannelSender) ReplyMessage(_ context.Context, channel *models.Channel, chatID string, replyToMessageID string, text string) (map[string]any, error) {
+	s.replyChannel = channel
+	s.replyChatID = chatID
+	s.replyMessageID = replyToMessageID
+	s.replyText = text
+	if s.replyResult != nil {
+		return s.replyResult, nil
+	}
+	return s.result, nil
+}
+
+func (s *stubChannelSender) EditMessage(_ context.Context, channel *models.Channel, chatID string, messageID string, text string) (map[string]any, error) {
+	s.editChannel = channel
+	s.editChatID = chatID
+	s.editMessageID = messageID
+	s.editText = text
+	if s.editResult != nil {
+		return s.editResult, nil
+	}
 	return s.result, nil
 }
 

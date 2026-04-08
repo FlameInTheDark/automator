@@ -73,6 +73,61 @@ func (r *ToolRegistry) registerPipelineTools() {
 	r.Register(ToolDefinition{
 		Type: "function",
 		Function: ToolSpec{
+			Name:        "get_pipeline",
+			Description: "Get pipeline data for a single pipeline by pipelineId or exact pipelineName. By default, the response includes nodes, edges, and viewport for editing.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pipelineId": map[string]any{
+						"type":        "string",
+						"description": "Pipeline ID to load.",
+					},
+					"pipelineName": map[string]any{
+						"type":        "string",
+						"description": "Exact pipeline name to load when pipelineId is unknown.",
+					},
+					"includeDefinition": map[string]any{
+						"type":        "boolean",
+						"description": "When true, include nodes, edges, and viewport in the response. Defaults to true.",
+					},
+				},
+			},
+		},
+	}, func(ctx context.Context, args json.RawMessage) (any, error) {
+		payload, err := parsePipelineToolArgMap(args)
+		if err != nil {
+			return nil, err
+		}
+
+		ref, err := parsePipelineToolReference(payload)
+		if err != nil {
+			return nil, err
+		}
+
+		includeDefinition := true
+		if _, ok := payload["includeDefinition"]; ok {
+			includeDefinition, err = parsePipelineToolOptionalBool(payload, "includeDefinition")
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		pipelineModel, err := service.Resolve(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+
+		output, err := pipelineops.BuildPipelineOutput(*pipelineModel, includeDefinition)
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]any{"pipeline": output}, nil
+	})
+
+	r.Register(ToolDefinition{
+		Type: "function",
+		Function: ToolSpec{
 			Name:        "create_pipeline",
 			Description: "Create a new pipeline. Provide a name and, when needed, nodes, edges, and an optional viewport using the Automator flow JSON schema.",
 			Parameters: map[string]any{

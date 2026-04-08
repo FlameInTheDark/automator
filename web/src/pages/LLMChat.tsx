@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Send, Bot, User, Loader2, Brain, Server } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api/client'
 import { Card } from '../components/ui/Card'
@@ -9,8 +10,9 @@ import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import Select from '../components/ui/Select'
 import Badge from '../components/ui/Badge'
+import { Checkbox } from '../components/ui/Form'
 import { cn } from '../lib/utils'
-import type { Cluster, LLMChatResponse, LLMProvider, LLMToolCall, LLMToolResult } from '../types'
+import type { Cluster, KubernetesCluster, LLMChatResponse, LLMProvider, LLMToolCall, LLMToolResult } from '../types'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -19,12 +21,24 @@ interface ChatMessage {
   tool_results?: LLMToolResult[]
 }
 
+const markdownComponents: Components = {
+  table: ({ children, ...props }) => (
+    <div className="chat-table-wrap">
+      <table {...props}>{children}</table>
+    </div>
+  ),
+}
+
 export default function LLMChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState('')
-  const [selectedCluster, setSelectedCluster] = useState('')
+  const [selectedProxmoxCluster, setSelectedProxmoxCluster] = useState('')
+  const [selectedKubernetesCluster, setSelectedKubernetesCluster] = useState('')
+  const [proxmoxEnabled, setProxmoxEnabled] = useState(false)
+  const [kubernetesEnabled, setKubernetesEnabled] = useState(false)
+  const [integrationDefaultsApplied, setIntegrationDefaultsApplied] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const { data: providers } = useQuery<LLMProvider[]>({
@@ -32,9 +46,14 @@ export default function LLMChat() {
     queryFn: () => api.llmProviders.list(),
   })
 
-  const { data: clusters } = useQuery<Cluster[]>({
+  const { data: proxmoxClusters } = useQuery<Cluster[]>({
     queryKey: ['clusters'],
     queryFn: () => api.clusters.list(),
+  })
+
+  const { data: kubernetesClusters } = useQuery<KubernetesCluster[]>({
+    queryKey: ['kubernetes-clusters'],
+    queryFn: () => api.kubernetesClusters.list(),
   })
 
   useEffect(() => {
@@ -51,10 +70,41 @@ export default function LLMChat() {
   }, [providers, selectedProvider])
 
   useEffect(() => {
-    if (clusters && !selectedCluster && clusters.length > 0) {
-      setSelectedCluster(clusters[0].id)
+    if (proxmoxClusters && !selectedProxmoxCluster && proxmoxClusters.length > 0) {
+      setSelectedProxmoxCluster(proxmoxClusters[0].id)
     }
-  }, [clusters, selectedCluster])
+  }, [proxmoxClusters, selectedProxmoxCluster])
+
+  useEffect(() => {
+    if (kubernetesClusters && !selectedKubernetesCluster && kubernetesClusters.length > 0) {
+      setSelectedKubernetesCluster(kubernetesClusters[0].id)
+    }
+  }, [kubernetesClusters, selectedKubernetesCluster])
+
+  useEffect(() => {
+    if (integrationDefaultsApplied || proxmoxClusters === undefined || kubernetesClusters === undefined) {
+      return
+    }
+
+    const hasProxmox = proxmoxClusters.length > 0
+    const hasKubernetes = kubernetesClusters.length > 0
+
+    if (hasProxmox && hasKubernetes) {
+      setProxmoxEnabled(true)
+      setKubernetesEnabled(false)
+    } else if (hasProxmox) {
+      setProxmoxEnabled(true)
+      setKubernetesEnabled(false)
+    } else if (hasKubernetes) {
+      setProxmoxEnabled(false)
+      setKubernetesEnabled(true)
+    } else {
+      setProxmoxEnabled(false)
+      setKubernetesEnabled(false)
+    }
+
+    setIntegrationDefaultsApplied(true)
+  }, [integrationDefaultsApplied, proxmoxClusters, kubernetesClusters])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -72,7 +122,16 @@ export default function LLMChat() {
       const response: LLMChatResponse = await api.llm.chat({
         message: userMessage.content,
         provider_id: selectedProvider || undefined,
-        cluster_id: selectedCluster || undefined,
+        integrations: {
+          proxmox: {
+            enabled: proxmoxEnabled,
+            cluster_id: proxmoxEnabled ? selectedProxmoxCluster || undefined : undefined,
+          },
+          kubernetes: {
+            enabled: kubernetesEnabled,
+            cluster_id: kubernetesEnabled ? selectedKubernetesCluster || undefined : undefined,
+          },
+        },
       })
 
       const assistantMessage: ChatMessage = {
@@ -106,28 +165,52 @@ export default function LLMChat() {
           <Brain className="w-5 h-5 text-accent flex-shrink-0" />
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-text">LLM Chat</h1>
-            <p className="text-xs text-text-muted">Interact with your Proxmox cluster using natural language</p>
+            <p className="text-xs text-text-muted">Interact with your infrastructure and automation tools using natural language</p>
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
-          {clusters && clusters.length > 0 ? (
-            <div className="flex items-center gap-2">
-              <Server className="w-4 h-4 text-text-dimmed" />
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-input/60 px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-text">
+              <Checkbox checked={proxmoxEnabled} onChange={(e) => setProxmoxEnabled(e.target.checked)} disabled={!proxmoxClusters || proxmoxClusters.length === 0} />
+              Proxmox
+            </label>
+            {proxmoxClusters && proxmoxClusters.length > 0 ? (
               <Select
-                value={selectedCluster}
-                onChange={(e) => setSelectedCluster(e.target.value)}
-                className="w-52"
+                value={selectedProxmoxCluster}
+                onChange={(e) => setSelectedProxmoxCluster(e.target.value)}
+                className="w-48"
               >
-                {clusters.map((cluster) => (
+                {proxmoxClusters.map((cluster) => (
                   <option key={cluster.id} value={cluster.id}>
                     {cluster.name}
                   </option>
                 ))}
               </Select>
-            </div>
-          ) : (
-            <Badge variant="warning">No clusters</Badge>
-          )}
+            ) : (
+              <Badge variant="warning">No Proxmox clusters</Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-input/60 px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-text">
+              <Checkbox checked={kubernetesEnabled} onChange={(e) => setKubernetesEnabled(e.target.checked)} disabled={!kubernetesClusters || kubernetesClusters.length === 0} />
+              Kubernetes
+            </label>
+            {kubernetesClusters && kubernetesClusters.length > 0 ? (
+              <Select
+                value={selectedKubernetesCluster}
+                onChange={(e) => setSelectedKubernetesCluster(e.target.value)}
+                className="w-48"
+              >
+                {kubernetesClusters.map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Badge variant="warning">No Kubernetes clusters</Badge>
+            )}
+          </div>
           {providers && providers.length > 0 && (
             <div className="flex items-center gap-2">
               <Brain className="w-4 h-4 text-text-dimmed" />
@@ -153,12 +236,12 @@ export default function LLMChat() {
             <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-4">
               <Bot className="w-8 h-8 text-accent" />
             </div>
-            <h2 className="text-xl font-semibold text-text mb-2">Proxmox AI Assistant</h2>
+            <h2 className="text-xl font-semibold text-text mb-2">Infrastructure Assistant</h2>
             <p className="text-text-muted max-w-md">
-              Ask me to manage your Proxmox cluster. I can list VMs, start or stop machines, check node status, and inspect resources.
+              Ask me to inspect Proxmox nodes, work with Kubernetes resources, run local automation commands, and help manage pipelines.
             </p>
             <div className="flex flex-wrap gap-2 mt-6 justify-center">
-              {['List all VMs', 'Show cluster resources', 'List nodes', 'Check storage'].map((suggestion) => (
+              {['List all VMs', 'Show Kubernetes deployments', 'List nodes', 'Check recent events'].map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => setInput(suggestion)}
@@ -190,12 +273,16 @@ export default function LLMChat() {
               )}
             </div>
             <div className={cn(
-              'rounded-xl px-4 py-3 max-w-[80%]',
+              'min-w-0 overflow-hidden rounded-xl px-4 py-3 max-w-[80%]',
               msg.role === 'user'
                 ? 'bg-accent/10 border border-accent/20'
                 : 'bg-bg-elevated border border-border',
             )}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} className="chat-markdown text-sm text-text">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+                className="chat-markdown text-sm text-text"
+              >
                 {msg.content}
               </ReactMarkdown>
 
@@ -263,7 +350,7 @@ export default function LLMChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask me to manage your selected cluster..."
+            placeholder="Ask me to work with the enabled integrations..."
             className="flex-1"
           />
           <Button onClick={() => void handleSend()} disabled={!input.trim() || isLoading}>

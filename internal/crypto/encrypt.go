@@ -7,7 +7,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"strings"
 )
+
+const encodedCiphertextPrefix = "enc:"
 
 type Encryptor struct {
 	key []byte
@@ -39,10 +42,12 @@ func (e *Encryptor) Encrypt(plaintext string) (string, error) {
 	}
 
 	ciphertext := aesGCM.Seal(nonce, nonce, []byte(plaintext), nil)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
+	return encodedCiphertextPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 func (e *Encryptor) Decrypt(encoded string) (string, error) {
+	encoded = strings.TrimPrefix(encoded, encodedCiphertextPrefix)
+
 	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", fmt.Errorf("decode ciphertext: %w", err)
@@ -70,4 +75,20 @@ func (e *Encryptor) Decrypt(encoded string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// DecryptCompat accepts the current prefixed ciphertext format, older unprefixed
+// ciphertexts, and legacy plaintext values that were stored before encryption
+// was enabled in the database.
+func (e *Encryptor) DecryptCompat(value string) (string, error) {
+	if strings.HasPrefix(value, encodedCiphertextPrefix) {
+		return e.Decrypt(value)
+	}
+
+	decrypted, err := e.Decrypt(value)
+	if err == nil {
+		return decrypted, nil
+	}
+
+	return value, nil
 }

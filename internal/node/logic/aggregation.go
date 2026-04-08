@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/FlameInTheDark/automator/internal/node"
+	"github.com/FlameInTheDark/automator/internal/nodeconfig"
 	"github.com/FlameInTheDark/automator/internal/pipeline"
 )
 
@@ -40,7 +41,7 @@ func (e *MergeNode) Execute(ctx context.Context, config json.RawMessage, _ map[s
 	entries := make([]map[string]any, 0, len(incoming))
 
 	for _, source := range incoming {
-		entries = append(entries, source.asEntry())
+		entries = append(entries, source.asEntry(source.NodeID))
 
 		objectValue, ok := source.Output.(map[string]any)
 		if !ok {
@@ -90,9 +91,17 @@ func (e *MergeNode) Validate(config json.RawMessage) error {
 
 type AggregateNode struct{}
 
-func (e *AggregateNode) Execute(ctx context.Context, _ json.RawMessage, _ map[string]any) (*node.NodeResult, error) {
+func (e *AggregateNode) Execute(ctx context.Context, config json.RawMessage, _ map[string]any) (*node.NodeResult, error) {
+	cfg, err := nodeconfig.ParseAggregateConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	incoming, err := incomingOutputsFromContext(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateResolvedNodeIDs(incomingSourceNodeIDs(incoming)); err != nil {
 		return nil, err
 	}
 
@@ -101,9 +110,10 @@ func (e *AggregateNode) Execute(ctx context.Context, _ json.RawMessage, _ map[st
 	byNodeID := make(map[string]any, len(incoming))
 
 	for _, source := range incoming {
+		resolvedNodeID := cfg.ResolveNodeID(source.NodeID)
 		items = append(items, source.Output)
-		entries = append(entries, source.asEntry())
-		byNodeID[source.NodeID] = source.Output
+		entries = append(entries, source.asEntry(resolvedNodeID))
+		byNodeID[resolvedNodeID] = source.Output
 	}
 
 	output := map[string]any{
@@ -122,8 +132,7 @@ func (e *AggregateNode) Validate(config json.RawMessage) error {
 		return nil
 	}
 
-	var raw map[string]any
-	if err := json.Unmarshal(config, &raw); err != nil {
+	if _, err := nodeconfig.ParseAggregateConfig(config); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 	return nil
@@ -163,17 +172,34 @@ func incomingOutputsFromContext(ctx context.Context) ([]incomingSource, error) {
 	return result, nil
 }
 
-func (s incomingSource) asEntry() map[string]any {
+func (s incomingSource) asEntry(nodeID string) map[string]any {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		nodeID = s.NodeID
+	}
+
 	entry := map[string]any{
-		"nodeId":   s.NodeID,
+		"nodeId":   nodeID,
 		"nodeType": s.NodeType,
 		"label":    s.Label,
 		"data":     s.Output,
+	}
+	if nodeID != s.NodeID {
+		entry["originalNodeId"] = s.NodeID
 	}
 	if strings.TrimSpace(s.SourceHandle) != "" {
 		entry["sourceHandle"] = s.SourceHandle
 	}
 	return entry
+}
+
+func incomingSourceNodeIDs(incoming []incomingSource) []string {
+	sourceNodeIDs := make([]string, 0, len(incoming))
+	for _, source := range incoming {
+		sourceNodeIDs = append(sourceNodeIDs, source.NodeID)
+	}
+
+	return sourceNodeIDs
 }
 
 func cloneMap(input map[string]any) map[string]any {

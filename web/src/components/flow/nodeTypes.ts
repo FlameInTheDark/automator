@@ -1,5 +1,124 @@
 import type { NodeType, NodeTypeDefinition, NodeCategory } from '../../types'
 
+const KUBERNETES_ACTION_TYPES: NodeTypeDefinition[] = [
+  {
+    type: 'action:kubernetes_api_resources',
+    label: 'K8s API Resources',
+    description: 'Read the API resources available on a Kubernetes cluster',
+    icon: 'globe',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '' },
+  },
+  {
+    type: 'action:kubernetes_list_resources',
+    label: 'K8s List Resources',
+    description: 'List Kubernetes resources by apiVersion and kind or resource name',
+    icon: 'list',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'v1', kind: '', resource: '', labelSelector: '', fieldSelector: '', allNamespaces: false, limit: 0 },
+  },
+  {
+    type: 'action:kubernetes_get_resource',
+    label: 'K8s Get Resource',
+    description: 'Fetch a single Kubernetes resource',
+    icon: 'workflow',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'v1', kind: '', resource: '', name: '' },
+  },
+  {
+    type: 'action:kubernetes_apply_manifest',
+    label: 'K8s Apply Manifest',
+    description: 'Apply Kubernetes manifests with server-side apply',
+    icon: 'copy',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', manifest: '', fieldManager: 'automator', force: false },
+  },
+  {
+    type: 'action:kubernetes_patch_resource',
+    label: 'K8s Patch Resource',
+    description: 'Patch a Kubernetes resource',
+    icon: 'wrench',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'apps/v1', kind: '', resource: '', name: '', patchType: 'merge', patch: '' },
+  },
+  {
+    type: 'action:kubernetes_delete_resource',
+    label: 'K8s Delete Resource',
+    description: 'Delete a Kubernetes resource or matching collection',
+    icon: 'trash-2',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'apps/v1', kind: '', resource: '', name: '', labelSelector: '', fieldSelector: '', propagationPolicy: 'background' },
+  },
+  {
+    type: 'action:kubernetes_scale_resource',
+    label: 'K8s Scale Resource',
+    description: 'Update workload replica count',
+    icon: 'workflow',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'apps/v1', kind: 'Deployment', resource: '', name: '', replicas: 1 },
+  },
+  {
+    type: 'action:kubernetes_rollout_restart',
+    label: 'K8s Rollout Restart',
+    description: 'Restart a rollout-capable workload',
+    icon: 'refresh-cw',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'apps/v1', kind: 'Deployment', resource: '', name: '' },
+  },
+  {
+    type: 'action:kubernetes_rollout_status',
+    label: 'K8s Rollout Status',
+    description: 'Wait for a workload rollout to become ready',
+    icon: 'refresh-cw',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', apiVersion: 'apps/v1', kind: 'Deployment', resource: '', name: '', timeoutSeconds: 300 },
+  },
+  {
+    type: 'action:kubernetes_pod_logs',
+    label: 'K8s Pod Logs',
+    description: 'Read logs from a Kubernetes pod',
+    icon: 'list',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', name: '', container: '', tailLines: 0, sinceSeconds: 0, timestamps: false, previous: false },
+  },
+  {
+    type: 'action:kubernetes_pod_exec',
+    label: 'K8s Pod Exec',
+    description: 'Run a command in a Kubernetes pod',
+    icon: 'code',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', name: '', container: '', command: ['sh', '-c', 'echo hello'] },
+  },
+  {
+    type: 'action:kubernetes_events',
+    label: 'K8s Events',
+    description: 'List recent Kubernetes events',
+    icon: 'message-square',
+    category: 'action',
+    color: '#10b981',
+    defaultConfig: { clusterId: '', namespace: '', limit: 50, fieldSelector: '', involvedObjectName: '', involvedObjectKind: '', involvedObjectUID: '' },
+  },
+]
+
+const KUBERNETES_TOOL_TYPES: NodeTypeDefinition[] = KUBERNETES_ACTION_TYPES.map((typeDef) => ({
+  ...typeDef,
+  type: typeDef.type.replace('action:', 'tool:') as NodeType,
+  label: `${typeDef.label} Tool`,
+  category: 'tool',
+  color: '#38bdf8',
+}))
+
 export const NODE_CATEGORIES: NodeCategory[] = [
   {
     id: 'trigger',
@@ -131,6 +250,24 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         defaultConfig: { channelId: '', recipient: '', message: '' },
       },
       {
+        type: 'action:channel_reply_message',
+        label: 'Reply To Message',
+        description: 'Send a new message as a reply to an existing channel message',
+        icon: 'corner-down-left',
+        category: 'action',
+        color: '#10b981',
+        defaultConfig: { channelId: '', recipient: '', replyToMessageId: '', message: '' },
+      },
+      {
+        type: 'action:channel_edit_message',
+        label: 'Edit Channel Message',
+        description: 'Edit a previously sent channel message by message ID',
+        icon: 'wrench',
+        category: 'action',
+        color: '#10b981',
+        defaultConfig: { channelId: '', recipient: '', messageId: '', message: '' },
+      },
+      {
         type: 'action:channel_send_and_wait',
         label: 'Send And Wait',
         description: 'Send a channel message and wait for the user reply',
@@ -138,6 +275,15 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         category: 'action',
         color: '#10b981',
         defaultConfig: { channelId: '', recipient: '', message: '', timeoutSeconds: 300 },
+      },
+      {
+        type: 'action:pipeline_get',
+        label: 'Get Pipeline',
+        description: 'Load pipeline data for a selected pipeline',
+        icon: 'workflow',
+        category: 'action',
+        color: '#10b981',
+        defaultConfig: { pipelineId: '', includeDefinition: true },
       },
       {
         type: 'action:pipeline_run',
@@ -148,6 +294,7 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         color: '#10b981',
         defaultConfig: { pipelineId: '', params: '' },
       },
+      ...KUBERNETES_ACTION_TYPES,
     ],
   },
   {
@@ -228,6 +375,15 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         defaultConfig: {},
       },
       {
+        type: 'tool:pipeline_get',
+        label: 'Get Pipeline Tool',
+        description: 'Expose a tool that returns data for a selected pipeline',
+        icon: 'workflow',
+        category: 'tool',
+        color: '#38bdf8',
+        defaultConfig: { pipelineId: '', includeDefinition: true, toolName: '', toolDescription: '', allowModelPipelineId: false },
+      },
+      {
         type: 'tool:pipeline_create',
         label: 'Create Pipeline Tool',
         description: 'Expose a tool that creates new pipelines',
@@ -261,7 +417,7 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         icon: 'wrench',
         category: 'tool',
         color: '#38bdf8',
-        defaultConfig: { pipelineId: '', toolName: '', toolDescription: '', allowModelPipelineId: false },
+        defaultConfig: { pipelineId: '', toolName: '', toolDescription: '', allowModelPipelineId: false, arguments: [] },
       },
       {
         type: 'tool:channel_send_and_wait',
@@ -272,6 +428,7 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         color: '#38bdf8',
         defaultConfig: { channelId: '', recipient: '', message: '', timeoutSeconds: 300 },
       },
+      ...KUBERNETES_TOOL_TYPES,
     ],
   },
   {
@@ -317,11 +474,11 @@ export const NODE_CATEGORIES: NodeCategory[] = [
       {
         type: 'logic:aggregate',
         label: 'Aggregate',
-        description: 'Collect multiple upstream outputs into ordered arrays with source metadata',
+        description: 'Collect multiple upstream outputs into ordered arrays with source metadata and optional output id overrides',
         icon: 'list',
         category: 'logic',
         color: '#8b5cf6',
-        defaultConfig: {},
+        defaultConfig: { idOverrides: {} },
       },
       {
         type: 'logic:return',
@@ -361,14 +518,24 @@ export const NODE_CATEGORIES: NodeCategory[] = [
   },
 ]
 
-export const NODE_TYPE_MAP: Record<NodeType, NodeTypeDefinition> = NODE_CATEGORIES.reduce(
-  (acc, cat) => {
-    cat.types.forEach((t) => {
-      acc[t.type] = t
-    })
+const EXTRA_NODE_TYPES: NodeTypeDefinition[] = [
+  {
+    type: 'visual:group',
+    label: 'Group',
+    description: 'Visual canvas group that keeps related nodes together without affecting execution.',
+    icon: 'square',
+    category: 'visual',
+    color: '#64748b',
+    defaultConfig: { color: '#64748b' },
+  },
+]
+
+export const NODE_TYPE_MAP: Record<NodeType, NodeTypeDefinition> = [...NODE_CATEGORIES.flatMap((category) => category.types), ...EXTRA_NODE_TYPES].reduce(
+  (acc, typeDef) => {
+    acc[typeDef.type] = typeDef
     return acc
   },
-  {} as Record<NodeType, NodeTypeDefinition>
+  {} as Record<NodeType, NodeTypeDefinition>,
 )
 
 export function getNodeColor(type: NodeType): string {

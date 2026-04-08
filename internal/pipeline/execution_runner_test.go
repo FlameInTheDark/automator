@@ -30,6 +30,29 @@ func (e *blockingExecutor) Validate(_ json.RawMessage) error {
 	return nil
 }
 
+type runnerFailingExecutor struct {
+	err error
+}
+
+func (e *runnerFailingExecutor) Execute(context.Context, json.RawMessage, map[string]any) (*node.NodeResult, error) {
+	return nil, e.err
+}
+
+func (e *runnerFailingExecutor) Validate(json.RawMessage) error {
+	return nil
+}
+
+type runnerPassthroughExecutor struct{}
+
+func (e *runnerPassthroughExecutor) Execute(_ context.Context, _ json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	data, _ := json.Marshal(input)
+	return &node.NodeResult{Output: data}, nil
+}
+
+func (e *runnerPassthroughExecutor) Validate(json.RawMessage) error {
+	return nil
+}
+
 type testExecutionStore struct {
 	mu             sync.Mutex
 	executions     map[string]*models.Execution
@@ -237,5 +260,83 @@ func TestExecutionRunner_CancelTracksActiveExecution(t *testing.T) {
 	}
 	if !broadcaster.hasMessageType("execution_completed") {
 		t.Fatal("expected execution_completed broadcast")
+	}
+}
+
+func TestExecutionRunner_ContinuedNodeErrorKeepsExecutionCompleted(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:fail", &runnerFailingExecutor{err: errors.New("boom")})
+	registry.Register("test:next", &runnerPassthroughExecutor{})
+
+	engine := NewEngine(registry)
+	store := newTestExecutionStore()
+	runner := NewExecutionRunner(store, engine, nil)
+
+	flowData := FlowData{
+		Nodes: []FlowNode{
+			{
+				ID:   "fail",
+				Type: "test:fail",
+				Data: json.RawMessage(`{"config":{"errorPolicy":"continue"}}`),
+			},
+			{ID: "next", Type: "test:next"},
+		},
+		Edges: []FlowEdge{
+			{ID: "edge-1", Source: "fail", Target: "next"},
+		},
+	}
+
+	result, err := runner.Run(context.Background(), "pipeline-1", flowData, "manual", map[string]any{"requestId": "req-1"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed", result.Status)
+	}
+
+	execution := store.executions[result.ExecutionID]
+	if execution == nil {
+		t.Fatal("expected execution to be stored")
+	}
+	if execution.Status != "completed" {
+		t.Fatalf("stored execution status = %q, want completed", execution.Status)
+	}
+
+	failedNode := store.nodeExecutions["node-fail"]
+	if failedNode == nil {
+		t.Fatal("expected failed node execution to be stored")
+	}
+	if failedNode.Status != "failed" {
+		t.Fatalf("failed node status = %q, want failed", failedNode.Status)
+	}
+
+	nextNode := store.nodeExecutions["node-next"]
+	if nextNode == nil {
+		t.Fatal("expected downstream node execution to be stored")
+	}
+	if nextNode.Status != "completed" {
+		t.Fatalf("downstream node status = %q, want completed", nextNode.Status)
+	}
+	if nextNode.Output == nil {
+		t.Fatal("expected downstream output to be stored")
+	}
+	if !json.Valid([]byte(*nextNode.Output)) {
+		t.Fatalf("downstream output should be valid JSON, got %q", *nextNode.Output)
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal([]byte(*nextNode.Output), &output); err != nil {
+		t.Fatalf("unmarshal downstream output: %v", err)
+	}
+
+	if got := output["error"]; got != "boom" {
+		t.Fatalf("output.error = %#v, want boom", got)
+	}
+	if got := output["errorNodeId"]; got != "fail" {
+		t.Fatalf("output.errorNodeId = %#v, want fail", got)
+	}
+	if got := output["requestId"]; got != "req-1" {
+		t.Fatalf("output.requestId = %#v, want req-1", got)
 	}
 }

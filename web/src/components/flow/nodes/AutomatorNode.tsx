@@ -1,10 +1,11 @@
 import { memo } from 'react'
-import { Handle, Position } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position, ResizeControlVariant } from '@xyflow/react'
 import { getNodeColor, getNodeLabel, getNodeIcon } from '../nodeTypes'
+import { getNodeBorderTint, getNodeStatusColor, resolveGroupColor, withAlpha } from '../nodeAppearance'
 import type { NodeExecutionLogData, NodeType } from '../../../types'
 import {
   Zap, Clock, Webhook, Play, Square, Copy, Globe, Code,
-  GitBranch, Split, Brain, Circle, Power, Timer, Link, FileText, MessageSquare, Send,
+  GitBranch, Split, Brain, Circle, Power, Timer, Link, FileText, MessageSquare, Send, RefreshCw,
   Bot, Workflow, List, Wrench, CornerDownLeft, Trash2,
 } from 'lucide-react'
 import { cn } from '../../../lib/utils'
@@ -27,6 +28,7 @@ const iconMap: Record<string, React.ElementType> = {
   workflow: Workflow,
   list: List,
   wrench: Wrench,
+  'refresh-cw': RefreshCw,
   'trash-2': Trash2,
   'corner-down-left': CornerDownLeft,
   circle: Circle,
@@ -101,6 +103,8 @@ function AutomatorNode({ data, selected }: { data: AutomatorNodeData; selected: 
   const isReturn = nodeType === 'logic:return'
   const isAgent = nodeType === 'llm:agent'
   const isTool = nodeType.startsWith('tool:')
+  const isGroup = nodeType === 'visual:group'
+  const groupColor = resolveGroupColor(data.config)
   const isLogic = isCondition || isSwitch
   const logicOutlets: LogicOutlet[] = isCondition
     ? [
@@ -111,17 +115,61 @@ function AutomatorNode({ data, selected }: { data: AutomatorNodeData; selected: 
     ? getSwitchOutlets(data.config)
     : []
 
-  const statusColor = data.status === 'success' ? '#22c55e'
-    : data.status === 'error' ? '#ef4444'
-    : data.status === 'running' ? '#f59e0b'
-    : data.status === 'pending' ? '#6b7280'
-    : null
+  const statusColor = getNodeStatusColor(data.status)
   const highlightColor = statusColor || '#f59e0b'
-  const borderTint = selected ? color : (isHighlight ? highlightColor : (statusColor || '#1e2d3d'))
+  const borderTint = getNodeBorderTint({
+    nodeType,
+    selected,
+    isHighlight,
+    status: data.status,
+    config: data.config,
+  })
   const shouldGlow = selected || isHighlight || statusColor !== null
   const boxShadow = shouldGlow
     ? `0 0 0 1px ${borderTint}55, 0 0 18px ${borderTint}33, 0 16px 36px ${borderTint}22`
     : '0 12px 28px rgba(2, 6, 23, 0.28)'
+
+  if (isGroup) {
+    return (
+      <div
+        className="relative h-full w-full overflow-visible rounded-[22px] border-2 border-dashed transition-all"
+        style={{
+          borderColor: borderTint,
+          backgroundColor: withAlpha(groupColor, '18'),
+          boxShadow,
+        }}
+      >
+        <div
+          className="absolute left-3 top-3 inline-flex max-w-[calc(100%-24px)] items-center gap-2 rounded-full border px-3 py-1.5 shadow-lg"
+          style={{
+            borderColor: withAlpha(groupColor, '88'),
+            backgroundColor: withAlpha(groupColor, '24'),
+          }}
+        >
+          <Icon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: groupColor }} />
+          <span className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-text">
+            {label}
+          </span>
+        </div>
+
+        {selected && (
+          <NodeResizeControl
+            position="bottom-right"
+            variant={ResizeControlVariant.Handle}
+            minWidth={280}
+            minHeight={180}
+            color={groupColor}
+            className="nodrag nopan"
+          >
+            <div
+              className="h-3.5 w-3.5 rounded-sm border-2 bg-bg-elevated shadow-lg"
+              style={{ borderColor: groupColor }}
+            />
+          </NodeResizeControl>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={cn(

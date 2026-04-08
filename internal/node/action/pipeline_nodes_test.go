@@ -129,3 +129,87 @@ func TestPipelineRunToolExecuteUsesProvidedPipelineID(t *testing.T) {
 		t.Fatalf("tool output pipeline_id = %#v, want %#v", got, want)
 	}
 }
+
+func TestPipelineRunToolExecuteInjectsConfiguredArguments(t *testing.T) {
+	t.Parallel()
+
+	runner := &stubPipelineRunner{}
+	executor := &PipelineRunToolNode{Runner: runner}
+	config, err := json.Marshal(runPipelineConfig{
+		PipelineID: "pipe-123",
+		Arguments: []runPipelineToolArgumentConfig{
+			{Name: "ticket", Description: "Ticket to inspect", Required: true},
+			{Name: "priority"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+
+	_, err = executor.ExecuteTool(
+		context.Background(),
+		config,
+		json.RawMessage(`{"ticket":"INC-42","priority":2,"params":{"message":"hello"}}`),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+
+	wantInput := map[string]any{
+		"message": "hello",
+		"arguments": map[string]any{
+			"ticket":   "INC-42",
+			"priority": float64(2),
+		},
+	}
+	if !reflect.DeepEqual(runner.input, wantInput) {
+		t.Fatalf("runner input = %#v, want %#v", runner.input, wantInput)
+	}
+}
+
+func TestPipelineGetToolExecuteReturnsPipelineData(t *testing.T) {
+	t.Parallel()
+
+	executor := &PipelineGetToolNode{
+		Pipelines: &stubPipelineCatalog{
+			byID: map[string]*models.Pipeline{
+				"pipe-123": {
+					ID:          "pipe-123",
+					Name:        "Support flow",
+					Description: nil,
+					Status:      "draft",
+					Nodes:       `[{"id":"trigger-1","type":"trigger:manual","data":{"label":"Manual Trigger","type":"trigger:manual","config":{},"enabled":true}}]`,
+					Edges:       `[]`,
+				},
+			},
+		},
+	}
+	config, err := json.Marshal(getPipelineConfig{
+		PipelineID:        "pipe-123",
+		IncludeDefinition: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+
+	result, err := executor.ExecuteTool(context.Background(), config, nil, nil)
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+
+	output, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("tool result has unexpected type %T", result)
+	}
+	pipelineOutput, ok := output["pipeline"].(map[string]any)
+	if !ok {
+		t.Fatalf("pipeline output missing or wrong type: %#v", output["pipeline"])
+	}
+	if got, want := pipelineOutput["id"], "pipe-123"; got != want {
+		t.Fatalf("pipeline id = %#v, want %#v", got, want)
+	}
+	if _, ok := pipelineOutput["nodes"]; !ok {
+		t.Fatalf("pipeline nodes missing from output: %#v", pipelineOutput)
+	}
+}

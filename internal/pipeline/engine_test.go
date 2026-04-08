@@ -194,6 +194,71 @@ func TestEngine_Execute_FailedNodeIsRecorded(t *testing.T) {
 	}
 }
 
+func TestEngine_Execute_ContinuesWhenNodeErrorPolicyIsContinue(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:fail", &failingExecutor{err: errors.New("boom")})
+	registry.Register("test:consumer", &testExecutor{output: map[string]any{"handled": true}})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{
+				ID:   "fail",
+				Type: "test:fail",
+				Data: json.RawMessage(`{"config":{"errorPolicy":"continue"}}`),
+			},
+			{ID: "consumer", Type: "test:consumer"},
+		},
+		Edges: []pipeline.FlowEdge{
+			{ID: "e1", Source: "fail", Target: "consumer"},
+		},
+	}
+
+	state, err := engine.Execute(context.Background(), flowData, "manual")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if len(state.NodeRuns) != 2 {
+		t.Fatalf("expected 2 node runs, got %d", len(state.NodeRuns))
+	}
+
+	failResult := state.NodeResults["fail"]
+	if failResult == nil || failResult.Error == nil {
+		t.Fatalf("expected failed node result to be recorded")
+	}
+
+	consumerResult := state.NodeResults["consumer"]
+	if consumerResult == nil {
+		t.Fatalf("expected consumer result")
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal(consumerResult.Output, &output); err != nil {
+		t.Fatalf("unmarshal consumer output: %v", err)
+	}
+
+	if got := output["input_handled"]; got != nil {
+		t.Fatalf("expected no upstream handled flag before consumer output, got %#v", got)
+	}
+	if got := output["input_failed"]; got != true {
+		t.Fatalf("input_failed = %#v, want true", got)
+	}
+	if got := output["input_error"]; got != "boom" {
+		t.Fatalf("input_error = %#v, want boom", got)
+	}
+	if got := output["input_errorMessage"]; got != "boom" {
+		t.Fatalf("input_errorMessage = %#v, want boom", got)
+	}
+	if got := output["input_errorNodeId"]; got != "fail" {
+		t.Fatalf("input_errorNodeId = %#v, want fail", got)
+	}
+	if got := output["input_errorNodeType"]; got != "test:fail" {
+		t.Fatalf("input_errorNodeType = %#v, want test:fail", got)
+	}
+}
+
 func TestEngine_Execute_EmptyPipeline(t *testing.T) {
 	registry := node.NewRegistry()
 	registry.Register("test:node", &testExecutor{output: map[string]any{}})
@@ -212,6 +277,35 @@ func TestEngine_Execute_EmptyPipeline(t *testing.T) {
 
 	if len(state.NodeResults) != 0 {
 		t.Errorf("expected 0 node results for empty pipeline, got %d", len(state.NodeResults))
+	}
+}
+
+func TestEngine_Execute_IgnoresVisualGroupRoots(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:node", &testExecutor{output: map[string]any{"result": "ok"}})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{ID: "group-1", Data: json.RawMessage(`{"type":"visual:group"}`)},
+			{ID: "node-1", Type: "test:node"},
+		},
+	}
+
+	state, err := engine.Execute(context.Background(), flowData, "manual")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if len(state.NodeResults) != 1 {
+		t.Fatalf("expected 1 node result, got %d", len(state.NodeResults))
+	}
+	if _, ok := state.NodeResults["node-1"]; !ok {
+		t.Fatalf("expected runtime node to execute")
+	}
+	if _, ok := state.NodeResults["group-1"]; ok {
+		t.Fatalf("did not expect visual group to execute")
 	}
 }
 
@@ -499,6 +593,84 @@ func TestEngine_Execute_AggregateNodeCollectsBranchOutputs(t *testing.T) {
 	}
 	if got := firstEntry["label"]; got != "Left Source" {
 		t.Fatalf("first label = %#v, want Left Source", got)
+	}
+}
+
+func TestEngine_Execute_AggregateNodeOverridesSourceIDsInOutput(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:left", &testExecutor{output: map[string]any{"name": "left"}})
+	registry.Register("test:right", &testExecutor{output: map[string]any{"name": "right"}})
+	registry.Register(node.TypeLogicAggregate, &logic.AggregateNode{})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{
+				ID:   "left",
+				Type: "test:left",
+				Data: json.RawMessage(`{"label":"Left Source"}`),
+			},
+			{
+				ID:   "right",
+				Type: "test:right",
+				Data: json.RawMessage(`{"label":"Right Source"}`),
+			},
+			{
+				ID:   "aggregate",
+				Type: string(node.TypeLogicAggregate),
+				Data: json.RawMessage(`{"idOverrides":{"left":"primary","right":"secondary"}}`),
+			},
+		},
+		Edges: []pipeline.FlowEdge{
+			{ID: "e1", Source: "left", Target: "aggregate"},
+			{ID: "e2", Source: "right", Target: "aggregate"},
+		},
+	}
+
+	state, err := engine.Execute(context.Background(), flowData, "manual")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	result := state.NodeResults["aggregate"]
+	if result == nil {
+		t.Fatalf("expected aggregate result")
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal(result.Output, &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+
+	byNodeID, ok := output["byNodeId"].(map[string]any)
+	if !ok {
+		t.Fatalf("byNodeId has unexpected type %T", output["byNodeId"])
+	}
+	if _, exists := byNodeID["left"]; exists {
+		t.Fatalf("expected left key to be replaced, got %#v", byNodeID)
+	}
+	if got := byNodeID["primary"]; got == nil {
+		t.Fatalf("expected primary key in byNodeId, got %#v", byNodeID)
+	}
+	if got := byNodeID["secondary"]; got == nil {
+		t.Fatalf("expected secondary key in byNodeId, got %#v", byNodeID)
+	}
+
+	entries, ok := output["entries"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("entries = %#v, want 2 entries", output["entries"])
+	}
+
+	firstEntry, ok := entries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first entry has unexpected type %T", entries[0])
+	}
+	if got := firstEntry["nodeId"]; got != "primary" {
+		t.Fatalf("first entry nodeId = %#v, want primary", got)
+	}
+	if got := firstEntry["originalNodeId"]; got != "left" {
+		t.Fatalf("first entry originalNodeId = %#v, want left", got)
 	}
 }
 

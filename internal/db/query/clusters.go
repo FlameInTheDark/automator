@@ -65,7 +65,7 @@ func (s *ClusterStore) GetByID(ctx context.Context, id string) (*models.Cluster,
 	}
 
 	if s.encryptor != nil && c.APITokenSecret != "" {
-		c.APITokenSecret, err = s.encryptor.Decrypt(c.APITokenSecret)
+		c.APITokenSecret, err = s.encryptor.DecryptCompat(c.APITokenSecret)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt secret: %w", err)
 		}

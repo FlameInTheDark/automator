@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/FlameInTheDark/automator/internal/api/handlers"
+	"github.com/FlameInTheDark/automator/internal/auth"
 	"github.com/FlameInTheDark/automator/internal/channels"
 	"github.com/FlameInTheDark/automator/internal/crypto"
 	"github.com/FlameInTheDark/automator/internal/db"
@@ -36,6 +37,7 @@ type Config struct {
 	WSHub           *ws.Hub
 	SkillStore      skills.Reader
 	ShellRunner     shellcmd.Runner
+	AuthService     *auth.Service
 }
 
 func New(cfg Config) *fiber.App {
@@ -51,6 +53,11 @@ func New(cfg Config) *fiber.App {
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
+
+	authService := cfg.AuthService
+	if authService == nil {
+		authService = auth.NewService(nil, auth.Config{})
+	}
 
 	var encryptor *crypto.Encryptor
 	if cfg.EncryptionKey != "" {
@@ -69,21 +76,26 @@ func New(cfg Config) *fiber.App {
 
 	clusterStore := query.NewClusterStore(cfg.DB.DB, encryptor)
 	clusterHandler := handlers.NewClusterHandler(clusterStore)
+	kubernetesClusterStore := query.NewKubernetesClusterStore(cfg.DB.DB, encryptor)
+	kubernetesClusterHandler := handlers.NewKubernetesClusterHandler(kubernetesClusterStore)
 	channelStore := query.NewChannelStore(cfg.DB.DB, encryptor)
 	channelContactStore := query.NewChannelContactStore(cfg.DB.DB)
 	channelHandler := handlers.NewChannelHandler(channelStore, channelContactStore, cfg.ChannelService)
+	userStore := query.NewUserStore(cfg.DB.DB, encryptor)
 
 	pipelineStore := query.NewPipelineStore(cfg.DB.DB)
 	llmProviderStore := query.NewLLMProviderStore(cfg.DB.DB, encryptor)
 	executionStore := query.NewExecutionStore(cfg.DB.DB)
 	llmProviderHandler := handlers.NewLLMProviderHandler(llmProviderStore)
 	dashboardHandler := handlers.NewDashboardHandler(clusterStore, pipelineStore, executionStore, channelStore, cfg.Scheduler)
+	authHandler := handlers.NewAuthHandler(authService)
+	userHandler := handlers.NewUserHandler(userStore, authService)
 
 	pipelineRunHandler := handlers.NewPipelineRunHandler(
 		pipelineStore,
 		cfg.ExecutionRunner,
 	)
-	llmChatHandler := handlers.NewLLMChatHandler(llmProviderStore, clusterStore, pipelineStore, cfg.ExecutionRunner, cfg.Scheduler, cfg.SkillStore, cfg.ShellRunner)
+	llmChatHandler := handlers.NewLLMChatHandler(llmProviderStore, clusterStore, kubernetesClusterStore, pipelineStore, cfg.ExecutionRunner, cfg.Scheduler, cfg.SkillStore, cfg.ShellRunner)
 	executionHandler := handlers.NewExecutionHandler(executionStore, cfg.ExecutionRunner)
 
 	api := app.Group("/api/v1")
@@ -91,6 +103,13 @@ func New(cfg Config) *fiber.App {
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
+	api.Post("/auth/login", authHandler.Login)
+	api.Get("/auth/session", authHandler.Session)
+	api.Post("/auth/logout", authHandler.Logout)
+
+	api.Post("/channels/connect", channelHandler.Connect)
+	api.Use(authMiddleware(authService))
+
 	api.Get("/dashboard/stats", dashboardHandler.Stats)
 
 	clusters := api.Group("/clusters")
@@ -100,6 +119,14 @@ func New(cfg Config) *fiber.App {
 	clusters.Put("/:id", clusterHandler.Update)
 	clusters.Delete("/:id", clusterHandler.Delete)
 
+	kubernetesClusters := api.Group("/kubernetes/clusters")
+	kubernetesClusters.Get("/", kubernetesClusterHandler.List)
+	kubernetesClusters.Post("/", kubernetesClusterHandler.Create)
+	kubernetesClusters.Post("/test", kubernetesClusterHandler.Test)
+	kubernetesClusters.Get("/:id", kubernetesClusterHandler.Get)
+	kubernetesClusters.Put("/:id", kubernetesClusterHandler.Update)
+	kubernetesClusters.Delete("/:id", kubernetesClusterHandler.Delete)
+
 	channelRoutes := api.Group("/channels")
 	channelRoutes.Get("/", channelHandler.List)
 	channelRoutes.Post("/", channelHandler.Create)
@@ -107,7 +134,6 @@ func New(cfg Config) *fiber.App {
 	channelRoutes.Put("/:id", channelHandler.Update)
 	channelRoutes.Delete("/:id", channelHandler.Delete)
 	channelRoutes.Get("/:id/contacts", channelHandler.ListContacts)
-	channelRoutes.Post("/connect", channelHandler.Connect)
 
 	pipelineHandler := pipelineHandler(pipelineStore, cfg.Scheduler)
 	pipelines := api.Group("/pipelines")
@@ -126,6 +152,12 @@ func New(cfg Config) *fiber.App {
 	llmProviders.Delete("/:id", llmProviderHandler.Delete)
 	llmProviders.Get("/:id/models", llmProviderHandler.ListModels)
 
+	users := api.Group("/users")
+	users.Get("/", userHandler.List)
+	users.Post("/", userHandler.Create)
+	users.Post("/change-password", userHandler.ChangePassword)
+	users.Delete("/:id", userHandler.Delete)
+
 	api.Post("/llm/chat", llmChatHandler.Chat)
 
 	executions := api.Group("/executions")
@@ -134,7 +166,7 @@ func New(cfg Config) *fiber.App {
 	executions.Get("/:executionId", executionHandler.Get)
 	executions.Post("/:executionId/cancel", executionHandler.Cancel)
 
-	app.Get("/ws/:channel", ws.WSUpgrader(wsHub))
+	app.Get("/ws/:channel", websocketAuthMiddleware(authService), ws.WSUpgrader(wsHub))
 
 	app.Use("*", serveEmbedded())
 

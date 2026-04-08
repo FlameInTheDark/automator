@@ -1,10 +1,12 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/FlameInTheDark/automator/internal/node"
+	"github.com/FlameInTheDark/automator/internal/nodeconfig"
 )
 
 func ValidateFlowData(flowData FlowData) error {
@@ -20,6 +22,9 @@ func validateReturnNodes(flowData FlowData) error {
 
 	for _, flowNode := range flowData.Nodes {
 		nodeType, _ := decodeNodeTypeAndConfig(flowNode)
+		if isVisualNodeType(nodeType) {
+			continue
+		}
 		if nodeType == node.TypeLogicReturn {
 			count++
 		}
@@ -34,6 +39,7 @@ func validateReturnNodes(flowData FlowData) error {
 
 func validateFlowEdges(flowData FlowData) error {
 	nodeTypes := make(map[string]node.NodeType, len(flowData.Nodes))
+	nodeConfigs := make(map[string]json.RawMessage, len(flowData.Nodes))
 
 	for _, flowNode := range flowData.Nodes {
 		nodeID := strings.TrimSpace(flowNode.ID)
@@ -45,12 +51,54 @@ func validateFlowEdges(flowData FlowData) error {
 		}
 
 		nodeType, _ := decodeNodeTypeAndConfig(flowNode)
+		if err := validateNodeErrorPolicy(nodeType, decodeNodeConfig(flowNode)); err != nil {
+			return fmt.Errorf("node %q: %w", nodeID, err)
+		}
 		nodeTypes[nodeID] = nodeType
+		nodeConfigs[nodeID] = decodeNodeConfig(flowNode)
 	}
 
 	for _, edge := range flowData.Edges {
 		if err := validateFlowEdge(edge, nodeTypes); err != nil {
 			return err
+		}
+	}
+
+	if err := validateAggregateNodeIDOverrides(flowData, nodeTypes, nodeConfigs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateAggregateNodeIDOverrides(flowData FlowData, nodeTypes map[string]node.NodeType, nodeConfigs map[string]json.RawMessage) error {
+	incomingByTarget := make(map[string][]string)
+	for _, edge := range flowData.Edges {
+		if isToolEdge(edge) {
+			continue
+		}
+
+		targetID := strings.TrimSpace(edge.Target)
+		sourceID := strings.TrimSpace(edge.Source)
+		if targetID == "" || sourceID == "" {
+			continue
+		}
+
+		incomingByTarget[targetID] = append(incomingByTarget[targetID], sourceID)
+	}
+
+	for nodeID, nodeType := range nodeTypes {
+		if nodeType != node.TypeLogicAggregate {
+			continue
+		}
+
+		cfg, err := nodeconfig.ParseAggregateConfig(nodeConfigs[nodeID])
+		if err != nil {
+			return fmt.Errorf("node %q: invalid aggregate config: %w", nodeID, err)
+		}
+
+		if err := cfg.ValidateResolvedNodeIDs(incomingByTarget[nodeID]); err != nil {
+			return fmt.Errorf("node %q: %w", nodeID, err)
 		}
 	}
 
@@ -88,6 +136,13 @@ func validateFlowEdge(edge FlowEdge, nodeTypes map[string]node.NodeType) error {
 		return nil
 	}
 
+	if isVisualNodeType(sourceType) || isVisualNodeType(targetType) {
+		nodeID := sourceID
+		if isVisualNodeType(targetType) {
+			nodeID = targetID
+		}
+		return fmt.Errorf("visual group node %q cannot have incoming or outgoing edges", nodeID)
+	}
 	if isToolNodeType(sourceType) {
 		return fmt.Errorf("tool node %q (%s) cannot be part of the main execution chain; connect it from an LLM Agent tool handle instead", sourceID, sourceType)
 	}
@@ -102,4 +157,13 @@ func validateFlowEdge(edge FlowEdge, nodeTypes map[string]node.NodeType) error {
 	}
 
 	return nil
+}
+
+func isVisualNodeType(nodeType node.NodeType) bool {
+	return strings.TrimSpace(string(nodeType)) == "visual:group"
+}
+
+func decodeNodeConfig(flowNode FlowNode) json.RawMessage {
+	_, config := decodeNodeTypeAndConfig(flowNode)
+	return config
 }

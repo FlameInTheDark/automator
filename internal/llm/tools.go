@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/FlameInTheDark/automator/internal/db/models"
+	ik8s "github.com/FlameInTheDark/automator/internal/kubernetes"
 	"github.com/FlameInTheDark/automator/internal/proxmox"
 	"github.com/FlameInTheDark/automator/internal/shellcmd"
 	"github.com/FlameInTheDark/automator/internal/skills"
@@ -18,6 +19,11 @@ type ToolHandler func(ctx context.Context, args json.RawMessage) (any, error)
 type ToolClusterStore interface {
 	List(ctx context.Context) ([]models.Cluster, error)
 	GetByID(ctx context.Context, id string) (*models.Cluster, error)
+}
+
+type ToolKubernetesClusterStore interface {
+	List(ctx context.Context) ([]models.KubernetesCluster, error)
+	GetByID(ctx context.Context, id string) (*models.KubernetesCluster, error)
 }
 
 type ToolPipelineStore interface {
@@ -46,16 +52,34 @@ type ToolPipelineRunResult struct {
 	ReturnValue  any    `json:"return_value,omitempty"`
 }
 
+type ToolRegistryOptions struct {
+	ProxmoxStore               ToolClusterStore
+	KubernetesStore            ToolKubernetesClusterStore
+	PipelineStore              ToolPipelineStore
+	PipelineReloader           ToolPipelineReloader
+	PipelineRunner             ToolPipelineRunner
+	DefaultProxmoxClusterID    string
+	DefaultKubernetesClusterID string
+	EnableProxmox              bool
+	EnableKubernetes           bool
+	SkillStore                 skills.Reader
+	ShellRunner                shellcmd.Runner
+}
+
 type ToolRegistry struct {
-	tools            map[string]ToolDefinition
-	handlers         map[string]ToolHandler
-	clusterStore     ToolClusterStore
-	pipelineStore    ToolPipelineStore
-	pipelineReloader ToolPipelineReloader
-	pipelineRunner   ToolPipelineRunner
-	defaultClusterID string
-	skillStore       skills.Reader
-	shellRunner      shellcmd.Runner
+	tools                      map[string]ToolDefinition
+	handlers                   map[string]ToolHandler
+	clusterStore               ToolClusterStore
+	kubernetesStore            ToolKubernetesClusterStore
+	pipelineStore              ToolPipelineStore
+	pipelineReloader           ToolPipelineReloader
+	pipelineRunner             ToolPipelineRunner
+	defaultClusterID           string
+	defaultKubernetesClusterID string
+	enableProxmox              bool
+	enableKubernetes           bool
+	skillStore                 skills.Reader
+	shellRunner                shellcmd.Runner
 }
 
 type proxmoxToolArgs struct {
@@ -72,19 +96,41 @@ func NewToolRegistry(
 	skillStore skills.Reader,
 	shellRunner shellcmd.Runner,
 ) *ToolRegistry {
+	return NewToolRegistryWithOptions(ToolRegistryOptions{
+		ProxmoxStore:            clusterStore,
+		PipelineStore:           pipelineStore,
+		PipelineReloader:        pipelineReloader,
+		PipelineRunner:          pipelineRunner,
+		DefaultProxmoxClusterID: defaultClusterID,
+		EnableProxmox:           true,
+		SkillStore:              skillStore,
+		ShellRunner:             shellRunner,
+	})
+}
+
+func NewToolRegistryWithOptions(opts ToolRegistryOptions) *ToolRegistry {
 	r := &ToolRegistry{
-		tools:            make(map[string]ToolDefinition),
-		handlers:         make(map[string]ToolHandler),
-		clusterStore:     clusterStore,
-		pipelineStore:    pipelineStore,
-		pipelineReloader: pipelineReloader,
-		pipelineRunner:   pipelineRunner,
-		defaultClusterID: strings.TrimSpace(defaultClusterID),
-		skillStore:       skillStore,
-		shellRunner:      shellRunner,
+		tools:                      make(map[string]ToolDefinition),
+		handlers:                   make(map[string]ToolHandler),
+		clusterStore:               opts.ProxmoxStore,
+		kubernetesStore:            opts.KubernetesStore,
+		pipelineStore:              opts.PipelineStore,
+		pipelineReloader:           opts.PipelineReloader,
+		pipelineRunner:             opts.PipelineRunner,
+		defaultClusterID:           strings.TrimSpace(opts.DefaultProxmoxClusterID),
+		defaultKubernetesClusterID: strings.TrimSpace(opts.DefaultKubernetesClusterID),
+		enableProxmox:              opts.EnableProxmox,
+		enableKubernetes:           opts.EnableKubernetes,
+		skillStore:                 opts.SkillStore,
+		shellRunner:                opts.ShellRunner,
 	}
 
-	r.registerProxmoxTools()
+	if r.enableProxmox {
+		r.registerProxmoxTools()
+	}
+	if r.enableKubernetes {
+		r.registerKubernetesTools()
+	}
 	r.registerPipelineTools()
 	r.registerSkillTools()
 	r.registerShellTools()
@@ -493,6 +539,33 @@ func (r *ToolRegistry) Register(def ToolDefinition, handler ToolHandler) {
 	r.handlers[def.Function.Name] = handler
 }
 
+func (r *ToolRegistry) kubernetesToolParameters(extraProperties map[string]any, required ...string) map[string]any {
+	properties := map[string]any{
+		"cluster_id": map[string]any{
+			"type":        "string",
+			"description": "Configured Kubernetes cluster ID. Optional when a cluster is already selected for the chat or only one cluster exists.",
+		},
+		"cluster_name": map[string]any{
+			"type":        "string",
+			"description": "Configured Kubernetes cluster name. Optional alternative to cluster_id.",
+		},
+	}
+
+	for key, value := range extraProperties {
+		properties[key] = value
+	}
+
+	params := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		params["required"] = required
+	}
+
+	return params
+}
+
 func (r *ToolRegistry) GetAllTools() []ToolDefinition {
 	tools := make([]ToolDefinition, 0, len(r.tools))
 	for _, t := range r.tools {
@@ -605,4 +678,67 @@ func (r *ToolRegistry) resolveCluster(ctx context.Context, params proxmoxToolArg
 
 func (p proxmoxToolArgs) proxmoxToolArgs() proxmoxToolArgs {
 	return p
+}
+
+func (r *ToolRegistry) resolveKubernetesCluster(ctx context.Context, clusterID string, clusterName string) (*models.KubernetesCluster, error) {
+	if r.kubernetesStore == nil {
+		return nil, fmt.Errorf("kubernetes cluster store is not configured")
+	}
+
+	if selectedID := strings.TrimSpace(clusterID); selectedID != "" {
+		cluster, err := r.kubernetesStore.GetByID(ctx, selectedID)
+		if err != nil {
+			return nil, fmt.Errorf("load kubernetes cluster %s: %w", selectedID, err)
+		}
+		return cluster, nil
+	}
+
+	clusters, err := r.kubernetesStore.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list kubernetes clusters: %w", err)
+	}
+	if len(clusters) == 0 {
+		return nil, fmt.Errorf("no Kubernetes clusters are configured")
+	}
+
+	if selectedName := strings.TrimSpace(clusterName); selectedName != "" {
+		for _, cluster := range clusters {
+			if strings.EqualFold(cluster.Name, selectedName) {
+				return r.kubernetesStore.GetByID(ctx, cluster.ID)
+			}
+		}
+		return nil, fmt.Errorf("kubernetes cluster named %q was not found", selectedName)
+	}
+
+	if r.defaultKubernetesClusterID != "" {
+		cluster, err := r.kubernetesStore.GetByID(ctx, r.defaultKubernetesClusterID)
+		if err == nil {
+			return cluster, nil
+		}
+	}
+
+	if len(clusters) == 1 {
+		return r.kubernetesStore.GetByID(ctx, clusters[0].ID)
+	}
+
+	names := make([]string, 0, len(clusters))
+	for _, cluster := range clusters {
+		names = append(names, cluster.Name)
+	}
+
+	return nil, fmt.Errorf("multiple Kubernetes clusters are configured (%s); specify cluster_id or cluster_name", strings.Join(names, ", "))
+}
+
+func (r *ToolRegistry) resolveKubernetesSession(ctx context.Context, clusterID string, clusterName string) (*ik8s.Session, *models.KubernetesCluster, error) {
+	cluster, err := r.resolveKubernetesCluster(ctx, clusterID, clusterName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	session, err := ik8s.NewSessionFromKubeconfig(cluster.Kubeconfig, cluster.ContextName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize kubernetes session for cluster %s: %w", cluster.Name, err)
+	}
+
+	return session, cluster, nil
 }

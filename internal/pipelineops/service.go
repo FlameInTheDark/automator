@@ -7,12 +7,15 @@ import (
 	"strings"
 
 	"github.com/FlameInTheDark/automator/internal/db/models"
+	"github.com/FlameInTheDark/automator/internal/nodeconfig"
 )
 
 const (
-	StatusDraft    = "draft"
-	StatusActive   = "active"
-	StatusArchived = "archived"
+	StatusDraft             = "draft"
+	StatusActive            = "active"
+	StatusArchived          = "archived"
+	nodeErrorPolicyStop     = "stop"
+	nodeErrorPolicyContinue = "continue"
 )
 
 type Store interface {
@@ -224,6 +227,7 @@ func ValidateDefinition(nodesJSON string, edgesJSON string) error {
 	}
 
 	nodeTypes := make(map[string]string, len(nodes))
+	nodeConfigs := make(map[string]json.RawMessage, len(nodes))
 	returnCount := 0
 	for _, flowNode := range nodes {
 		nodeID := strings.TrimSpace(flowNode.ID)
@@ -235,8 +239,15 @@ func ValidateDefinition(nodesJSON string, edgesJSON string) error {
 		}
 
 		nodeType := resolveNodeType(flowNode)
+		if err := validateNodeErrorPolicy(nodeType, resolveNodeConfig(flowNode)); err != nil {
+			return fmt.Errorf("node %q: %w", nodeID, err)
+		}
 		nodeTypes[nodeID] = nodeType
+		nodeConfigs[nodeID] = resolveNodeConfig(flowNode)
 
+		if isVisualNodeType(nodeType) {
+			continue
+		}
 		if nodeType == "logic:return" {
 			returnCount++
 		}
@@ -248,6 +259,48 @@ func ValidateDefinition(nodesJSON string, edgesJSON string) error {
 	for _, edge := range edges {
 		if err := validateFlowEdge(edge, nodeTypes); err != nil {
 			return err
+		}
+	}
+
+	if err := validateAggregateNodeIDOverrides(edges, nodeTypes, nodeConfigs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateAggregateNodeIDOverrides(
+	edges []flowEdge,
+	nodeTypes map[string]string,
+	nodeConfigs map[string]json.RawMessage,
+) error {
+	incomingByTarget := make(map[string][]string)
+	for _, edge := range edges {
+		if isToolEdge(edge) {
+			continue
+		}
+
+		targetID := strings.TrimSpace(edge.Target)
+		sourceID := strings.TrimSpace(edge.Source)
+		if targetID == "" || sourceID == "" {
+			continue
+		}
+
+		incomingByTarget[targetID] = append(incomingByTarget[targetID], sourceID)
+	}
+
+	for nodeID, nodeType := range nodeTypes {
+		if nodeType != "logic:aggregate" {
+			continue
+		}
+
+		cfg, err := nodeconfig.ParseAggregateConfig(nodeConfigs[nodeID])
+		if err != nil {
+			return fmt.Errorf("node %q: invalid aggregate config: %w", nodeID, err)
+		}
+
+		if err := cfg.ValidateResolvedNodeIDs(incomingByTarget[nodeID]); err != nil {
+			return fmt.Errorf("node %q: %w", nodeID, err)
 		}
 	}
 
@@ -367,6 +420,24 @@ func resolveNodeType(flowNode flowNode) string {
 	return strings.TrimSpace(nodeType)
 }
 
+func resolveNodeConfig(flowNode flowNode) json.RawMessage {
+	if len(flowNode.Data) == 0 {
+		return flowNode.Data
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(flowNode.Data, &payload); err != nil {
+		return flowNode.Data
+	}
+
+	config, ok := payload["config"]
+	if !ok {
+		return flowNode.Data
+	}
+
+	return config
+}
+
 func validateFlowEdge(edge flowEdge, nodeTypes map[string]string) error {
 	edgeID := strings.TrimSpace(edge.ID)
 	if edgeID == "" {
@@ -398,6 +469,13 @@ func validateFlowEdge(edge flowEdge, nodeTypes map[string]string) error {
 		return nil
 	}
 
+	if isVisualNodeType(sourceType) || isVisualNodeType(targetType) {
+		nodeID := sourceID
+		if isVisualNodeType(targetType) {
+			nodeID = targetID
+		}
+		return fmt.Errorf("visual group node %q cannot have incoming or outgoing edges", nodeID)
+	}
 	if isToolNodeType(sourceType) {
 		return fmt.Errorf("tool node %q (%s) cannot be part of the main execution chain; connect it from an LLM Agent tool handle instead", sourceID, sourceType)
 	}
@@ -424,6 +502,78 @@ func isToolNodeType(nodeType string) bool {
 
 func isTriggerNodeType(nodeType string) bool {
 	return strings.HasPrefix(strings.TrimSpace(nodeType), "trigger:")
+}
+
+func isVisualNodeType(nodeType string) bool {
+	return strings.TrimSpace(nodeType) == "visual:group"
+}
+
+func validateNodeErrorPolicy(nodeType string, config json.RawMessage) error {
+	policy := decodeNodeErrorPolicy(config)
+	if policy == nodeErrorPolicyStop {
+		return nil
+	}
+
+	if policy != nodeErrorPolicyContinue {
+		return fmt.Errorf("errorPolicy must be %q or %q", nodeErrorPolicyStop, nodeErrorPolicyContinue)
+	}
+
+	if !nodeSupportsErrorPolicy(nodeType) {
+		return fmt.Errorf("errorPolicy %q is not supported for node type %s", nodeErrorPolicyContinue, nodeType)
+	}
+
+	return nil
+}
+
+func decodeNodeErrorPolicy(config json.RawMessage) string {
+	if len(config) == 0 {
+		return nodeErrorPolicyStop
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(config, &payload); err != nil {
+		return nodeErrorPolicyStop
+	}
+
+	rawPolicy, ok := payload["errorPolicy"]
+	if !ok {
+		return nodeErrorPolicyStop
+	}
+
+	var policy string
+	if err := json.Unmarshal(rawPolicy, &policy); err != nil {
+		return nodeErrorPolicyStop
+	}
+
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "", nodeErrorPolicyStop:
+		return nodeErrorPolicyStop
+	case nodeErrorPolicyContinue:
+		return nodeErrorPolicyContinue
+	default:
+		return strings.ToLower(strings.TrimSpace(policy))
+	}
+}
+
+func nodeSupportsErrorPolicy(nodeType string) bool {
+	trimmed := strings.TrimSpace(nodeType)
+
+	switch {
+	case trimmed == "":
+		return true
+	case strings.HasPrefix(trimmed, "tool:"):
+		return false
+	case trimmed == "visual:group":
+		return false
+	case trimmed == "logic:return":
+		return false
+	case trimmed == "logic:condition":
+		return false
+	case trimmed == "logic:switch":
+		return false
+	default:
+		return true
+	}
 }
 
 func decodeJSONValue(raw string, fallback any) (any, error) {

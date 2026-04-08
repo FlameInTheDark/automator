@@ -110,7 +110,7 @@ body {
 .chat-markdown ol,
 .chat-markdown blockquote,
 .chat-markdown pre,
-.chat-markdown table {
+.chat-table-wrap {
   margin: 0.65rem 0;
 }
 
@@ -158,8 +158,18 @@ body {
 }
 
 .chat-markdown table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
+  margin: 0;
+}
+
+.chat-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(30, 45, 61, 0.95);
+  border-radius: 10px;
+  background: rgba(19, 27, 36, 0.98);
 }
 
 .chat-markdown th,

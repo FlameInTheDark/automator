@@ -105,6 +105,83 @@ func TestValidateDefinitionRejectsToolHandleToNonToolTarget(t *testing.T) {
 	}
 }
 
+func TestValidateDefinitionAllowsVisualGroupWithoutEdges(t *testing.T) {
+	t.Parallel()
+
+	nodes := `[
+		{"id":"group-1","data":{"type":"visual:group"}},
+		{"id":"action-1","data":{"type":"action:http"}}
+	]`
+
+	if err := ValidateDefinition(nodes, "[]"); err != nil {
+		t.Fatalf("expected validation to succeed, got %v", err)
+	}
+}
+
+func TestValidateDefinitionRejectsVisualGroupEdges(t *testing.T) {
+	t.Parallel()
+
+	nodes := `[
+		{"id":"group-1","data":{"type":"visual:group"}},
+		{"id":"action-1","data":{"type":"action:http"}}
+	]`
+	edges := `[{"id":"edge-1","source":"action-1","target":"group-1"}]`
+
+	err := ValidateDefinition(nodes, edges)
+	if err == nil {
+		t.Fatal("expected validation to fail")
+	}
+	if !strings.Contains(err.Error(), "visual group node") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateDefinitionRejectsUnsupportedContinueOnErrorPolicy(t *testing.T) {
+	t.Parallel()
+
+	nodes := `[{"id":"condition-1","data":{"type":"logic:condition","config":{"expression":"true","errorPolicy":"continue"}}}]`
+
+	err := ValidateDefinition(nodes, "[]")
+	if err == nil {
+		t.Fatal("expected validation to fail")
+	}
+	if !strings.Contains(err.Error(), "errorPolicy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateDefinitionAllowsContinueOnErrorPolicyForActionNodes(t *testing.T) {
+	t.Parallel()
+
+	nodes := `[{"id":"action-1","data":{"type":"action:http","config":{"url":"https://example.com","errorPolicy":"continue"}}}]`
+
+	if err := ValidateDefinition(nodes, "[]"); err != nil {
+		t.Fatalf("expected validation to succeed, got %v", err)
+	}
+}
+
+func TestValidateDefinitionRejectsAggregateDuplicateResolvedIDs(t *testing.T) {
+	t.Parallel()
+
+	nodes := `[
+		{"id":"left","data":{"type":"action:http"}},
+		{"id":"right","data":{"type":"action:http"}},
+		{"id":"aggregate","data":{"type":"logic:aggregate","config":{"idOverrides":{"left":"shared","right":"shared"}}}}
+	]`
+	edges := `[
+		{"id":"edge-1","source":"left","target":"aggregate"},
+		{"id":"edge-2","source":"right","target":"aggregate"}
+	]`
+
+	err := ValidateDefinition(nodes, edges)
+	if err == nil {
+		t.Fatal("expected validation to fail")
+	}
+	if !strings.Contains(err.Error(), "aggregate output id") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestServiceResolveByNameRequiresUniqueMatch(t *testing.T) {
 	t.Parallel()
 

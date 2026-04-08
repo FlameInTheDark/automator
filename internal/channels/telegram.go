@@ -94,6 +94,54 @@ func (r *telegramRuntime) SendMessage(ctx context.Context, chatID string, text s
 	return result, nil
 }
 
+func (r *telegramRuntime) EditMessage(ctx context.Context, chatID string, messageID string, text string) (map[string]any, error) {
+	parsedMessageID, err := strconv.Atoi(strings.TrimSpace(messageID))
+	if err != nil {
+		return nil, fmt.Errorf("parse telegram message id %q: %w", messageID, err)
+	}
+
+	message, err := r.bot.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:    telegramChatID(chatID),
+		MessageID: parsedMessageID,
+		Text:      text,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("edit telegram message: %w", err)
+	}
+
+	result, err := marshalValueToMap(message)
+	if err != nil {
+		return nil, fmt.Errorf("serialize telegram response: %w", err)
+	}
+
+	return result, nil
+}
+
+func (r *telegramRuntime) ReplyMessage(ctx context.Context, chatID string, replyToMessageID string, text string) (map[string]any, error) {
+	parsedMessageID, err := strconv.Atoi(strings.TrimSpace(replyToMessageID))
+	if err != nil {
+		return nil, fmt.Errorf("parse telegram reply message id %q: %w", replyToMessageID, err)
+	}
+
+	message, err := r.bot.SendMessage(ctx, &tgbot.SendMessageParams{
+		ChatID: telegramChatID(chatID),
+		Text:   text,
+		ReplyParameters: &tgmodels.ReplyParameters{
+			MessageID: parsedMessageID,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reply to telegram message: %w", err)
+	}
+
+	result, err := marshalValueToMap(message)
+	if err != nil {
+		return nil, fmt.Errorf("serialize telegram response: %w", err)
+	}
+
+	return result, nil
+}
+
 func (r *telegramRuntime) Close() error {
 	return nil
 }
