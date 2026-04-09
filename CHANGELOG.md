@@ -1,3 +1,15 @@
+# [1.3.0](https://github.com/FlameInTheDark/automator/compare/v1.2.0...v1.3.0) (2026-04-09)
+
+
+### Bug Fixes
+
+* lock file fix ([d4e4a11](https://github.com/FlameInTheDark/automator/commit/d4e4a111f673d6579d363c2990745d296cd7fc03))
+
+
+### Features
+
+* UI update, better chat and live agent in the pipeline editor ([ea98f3c](https://github.com/FlameInTheDark/automator/commit/ea98f3c6785948d67d3c4b8fbc70136a5ab5a74d))
+
 # [1.2.0](https://github.com/FlameInTheDark/automator/compare/v1.1.0...v1.2.0) (2026-04-08)
 
 
