@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Panel } from '@xyflow/react'
-import { Brain, Check, ChevronDown, Loader2, Send, Square, Trash2, Wrench, X } from 'lucide-react'
+import { Brain, Check, ChevronDown, ChevronRight, Loader2, Send, Square, Terminal, Trash2, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -11,6 +11,7 @@ import type {
   EditorAssistantMessage,
   EditorAssistantMode,
   EditorAssistantPipelineSnapshot,
+  EditorAssistantExecutionLogAttachment,
   EditorAssistantResponse,
   EditorAssistantSelection,
   LLMProvider,
@@ -28,6 +29,12 @@ type StreamingToolActivity = {
   status: 'running' | 'completed' | 'failed'
 }
 
+type AttachedLogState = {
+  attachment: EditorAssistantExecutionLogAttachment
+  enabled: boolean
+  expanded: boolean
+}
+
 const assistantMarkdownClassName = cn(
   'prose prose-invert max-w-none overflow-hidden break-words text-sm',
   'prose-p:my-2 prose-p:break-words prose-li:break-words prose-headings:break-words',
@@ -40,6 +47,7 @@ type EditorAssistantDockProps = {
   pipeline: EditorAssistantPipelineSnapshot
   selection: EditorAssistantSelection
   providers: LLMProvider[]
+  injectedLogAttachment?: EditorAssistantExecutionLogAttachment | null
   onApplyOperations: (operations: LivePipelineOperation[]) => Promise<void> | void
   onEditLockChange: (locked: boolean) => void
 }
@@ -49,6 +57,7 @@ export default function EditorAssistantDock({
   pipeline,
   selection,
   providers,
+  injectedLogAttachment,
   onApplyOperations,
   onEditLockChange,
 }: EditorAssistantDockProps) {
@@ -64,6 +73,7 @@ export default function EditorAssistantDock({
   const [streamingUsage, setStreamingUsage] = useState<LLMUsage | null>(null)
   const [streamingToolActivity, setStreamingToolActivity] = useState<StreamingToolActivity[]>([])
   const [openQuickPicker, setOpenQuickPicker] = useState<QuickPickerType>(null)
+  const [attachedLog, setAttachedLog] = useState<AttachedLogState | null>(null)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const quickPickerRef = useRef<HTMLDivElement>(null)
@@ -75,7 +85,8 @@ export default function EditorAssistantDock({
     Boolean(input.trim()) ||
     Boolean(streamingAssistant.trim()) ||
     streamingToolActivity.length > 0 ||
-    Boolean(streamingUsage)
+    Boolean(streamingUsage) ||
+    Boolean(attachedLog)
   )
   const providerLabel = providers.find((provider) => provider.id === providerId)?.name ?? 'Choose model'
 
@@ -93,6 +104,7 @@ export default function EditorAssistantDock({
     setStreamingAssistant('')
     setStreamingUsage(null)
     setStreamingToolActivity([])
+    setAttachedLog(null)
     setOpenQuickPicker(null)
     setIsSending(false)
     setOpen(false)
@@ -117,6 +129,24 @@ export default function EditorAssistantDock({
 
     textareaRef.current?.focus()
   }, [open])
+
+  useEffect(() => {
+    if (!injectedLogAttachment?.id) {
+      return
+    }
+
+    setOpen(true)
+    setOpenQuickPicker(null)
+    setAttachedLog({
+      attachment: injectedLogAttachment,
+      enabled: true,
+      expanded: false,
+    })
+
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+  }, [injectedLogAttachment])
 
   useEffect(() => {
     if (!openQuickPicker) {
@@ -175,6 +205,7 @@ export default function EditorAssistantDock({
         messages,
         pipeline,
         selection,
+        attached_log: attachedLog?.enabled ? attachedLog.attachment : undefined,
       }, {
         onEvent: (event) => {
           switch (event.type) {
@@ -251,6 +282,7 @@ export default function EditorAssistantDock({
     setStreamingAssistant('')
     setStreamingUsage(null)
     setStreamingToolActivity([])
+    setAttachedLog(null)
     setOpenQuickPicker(null)
     onEditLockChange(false)
     addToast({
@@ -368,6 +400,32 @@ export default function EditorAssistantDock({
                   className="min-h-[92px] max-h-56 w-full resize-none border-0 bg-transparent px-4 pb-2 pt-4 text-sm text-text placeholder:text-text-dimmed focus:outline-none"
                   rows={1}
                 />
+
+                {attachedLog && (
+                  <div className="px-4 pb-3">
+                    <AssistantAttachedLogPill
+                      attachment={attachedLog.attachment}
+                      enabled={attachedLog.enabled}
+                      expanded={attachedLog.expanded}
+                      disabled={isSending}
+                      onToggleExpanded={() => {
+                        setAttachedLog((current) => (
+                          current
+                            ? { ...current, expanded: !current.expanded }
+                            : current
+                        ))
+                      }}
+                      onToggleEnabled={() => {
+                        setAttachedLog((current) => (
+                          current
+                            ? { ...current, enabled: !current.enabled }
+                            : current
+                        ))
+                      }}
+                      onRemove={() => setAttachedLog(null)}
+                    />
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-end justify-between gap-3 border-t border-border/70 px-4 pb-4 pt-3">
                   <div ref={quickPickerRef} className="relative flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -504,6 +562,92 @@ function AssistantStreamingBubble({
           {usage && usage.total_tokens > 0 && <span>{usage.total_tokens} tokens</span>}
         </div>
       </div>
+    </div>
+  )
+}
+
+function AssistantAttachedLogPill({
+  attachment,
+  enabled,
+  expanded,
+  disabled,
+  onToggleExpanded,
+  onToggleEnabled,
+  onRemove,
+}: {
+  attachment: EditorAssistantExecutionLogAttachment
+  enabled: boolean
+  expanded: boolean
+  disabled?: boolean
+  onToggleExpanded: () => void
+  onToggleEnabled: () => void
+  onRemove: () => void
+}) {
+  const summary = `${attachment.execution.status} · ${attachment.nodes.length} node${attachment.nodes.length === 1 ? '' : 's'}`
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border/70 bg-bg/60">
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          disabled={disabled}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-full text-left text-xs text-text transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+          aria-expanded={expanded}
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+          )}
+          <Terminal className="h-3.5 w-3.5 shrink-0 text-accent" />
+          <span className="font-medium">Logs</span>
+          <span className="truncate text-text-dimmed">{summary}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggleEnabled}
+          disabled={disabled}
+          className={cn(
+            'inline-flex h-7 items-center rounded-full border px-2.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+            enabled
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15'
+              : 'border-border bg-bg text-text-dimmed hover:text-text',
+          )}
+        >
+          {enabled ? 'On' : 'Off'}
+        </button>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={disabled}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-bg text-text-dimmed transition-colors hover:border-accent/30 hover:text-text disabled:cursor-not-allowed disabled:opacity-60"
+          aria-label="Remove attached log"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-border/70 px-3 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-dimmed">
+            <span className="rounded-full border border-border bg-bg px-2 py-1">
+              Run {attachment.execution.id.slice(0, 8)}
+            </span>
+            <span className="rounded-full border border-border bg-bg px-2 py-1">
+              Trigger {attachment.execution.trigger_type}
+            </span>
+            <span className="rounded-full border border-border bg-bg px-2 py-1">
+              {attachment.execution.status}
+            </span>
+          </div>
+          <pre className="mt-3 max-h-52 overflow-auto rounded-xl border border-border bg-bg px-3 py-3 text-[11px] leading-5 text-text whitespace-pre-wrap break-words">
+            {JSON.stringify(attachment, null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   )
 }

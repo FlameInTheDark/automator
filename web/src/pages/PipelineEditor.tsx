@@ -42,7 +42,7 @@ import { buildPipelineDocument, extractSingleDefinitionDocument } from '../lib/d
 import { downloadJSON, sanitizeFilename } from '../lib/download'
 import { applyLivePipelineOperations } from '../lib/editorAssistant'
 import { cn } from '../lib/utils'
-import type { FlowDefinitionDocument, LLMProvider, LivePipelineOperation, NodeExecutionLogData, Pipeline, PipelineRunResponse, NodeType, TemplateSummary } from '../types'
+import type { EditorAssistantExecutionLogAttachment, ExecutionDetail, FlowDefinitionDocument, LLMProvider, LivePipelineOperation, NodeExecutionLogData, Pipeline, PipelineRunResponse, NodeType, TemplateSummary } from '../types'
 
 const nodeTypes = {
   automator: AutomatorNode,
@@ -406,6 +406,103 @@ function getVisualExecutionStatus(status?: string): 'pending' | 'running' | 'suc
   }
 }
 
+const EXECUTION_LOG_STRING_LIMIT = 1200
+const EXECUTION_LOG_ARRAY_LIMIT = 6
+const EXECUTION_LOG_OBJECT_LIMIT = 12
+const EXECUTION_LOG_DEPTH_LIMIT = 4
+
+function parseExecutionLogValue(value?: string): unknown {
+  if (!value) {
+    return undefined
+  }
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+function compactExecutionLogValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return value.length <= EXECUTION_LOG_STRING_LIMIT
+      ? value
+      : `${value.slice(0, EXECUTION_LOG_STRING_LIMIT)}... [truncated ${value.length - EXECUTION_LOG_STRING_LIMIT} chars]`
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) {
+    return value
+  }
+
+  if (depth >= EXECUTION_LOG_DEPTH_LIMIT) {
+    if (Array.isArray(value)) {
+      return `[array truncated, ${value.length} item(s)]`
+    }
+
+    if (typeof value === 'object') {
+      return '[object truncated]'
+    }
+  }
+
+  if (Array.isArray(value)) {
+    const next = value
+      .slice(0, EXECUTION_LOG_ARRAY_LIMIT)
+      .map((entry) => compactExecutionLogValue(entry, depth + 1))
+
+    if (value.length > EXECUTION_LOG_ARRAY_LIMIT) {
+      next.push(`... ${value.length - EXECUTION_LOG_ARRAY_LIMIT} more item(s) omitted`)
+    }
+
+    return next
+  }
+
+  if (!value || typeof value !== 'object') {
+    return String(value)
+  }
+
+  const entries = Object.entries(value)
+  const next = entries
+    .slice(0, EXECUTION_LOG_OBJECT_LIMIT)
+    .reduce<Record<string, unknown>>((acc, [key, child]) => {
+      acc[key] = compactExecutionLogValue(child, depth + 1)
+      return acc
+    }, {})
+
+  if (entries.length > EXECUTION_LOG_OBJECT_LIMIT) {
+    next._truncated = `${entries.length - EXECUTION_LOG_OBJECT_LIMIT} more field(s) omitted`
+  }
+
+  return next
+}
+
+function buildAssistantLogAttachment(detail: ExecutionDetail): EditorAssistantExecutionLogAttachment {
+  const nodes = detail.node_executions.map((nodeExecution) => ({
+    node_id: nodeExecution.node_id,
+    node_type: nodeExecution.node_type,
+    status: nodeExecution.status,
+    input: compactExecutionLogValue(parseExecutionLogValue(nodeExecution.input)),
+    output: compactExecutionLogValue(parseExecutionLogValue(nodeExecution.output)),
+    error: nodeExecution.error || undefined,
+  }))
+
+  const payload = {
+    execution: {
+      id: detail.execution.id,
+      trigger_type: detail.execution.trigger_type,
+      status: detail.execution.status,
+      started_at: detail.execution.started_at,
+      completed_at: detail.execution.completed_at,
+      error: detail.execution.error || undefined,
+    },
+    nodes,
+  }
+
+  return {
+    id: `${detail.execution.id}-${Date.now()}`,
+    ...payload,
+  }
+}
+
 function isToolNodeType(type: unknown): type is NodeType {
   return typeof type === 'string' && type.startsWith('tool:')
 }
@@ -469,6 +566,7 @@ function PipelineEditor() {
   const [templateMenuPosition, setTemplateMenuPosition] = useState<{ x: number; y: number } | null>(null)
   const [isBlockingOverlayOpen, setIsBlockingOverlayOpen] = useState(false)
   const [assistantEditLockActive, setAssistantEditLockActive] = useState(false)
+  const [assistantLogAttachment, setAssistantLogAttachment] = useState<EditorAssistantExecutionLogAttachment | null>(null)
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false)
   const [showTemplateLibraryModal, setShowTemplateLibraryModal] = useState(false)
   const [templateDraftName, setTemplateDraftName] = useState('')
@@ -688,7 +786,7 @@ function PipelineEditor() {
       operations,
     })
 
-    setNodes(nextState.nodes)
+    setNodes(normalizeNodesForSubflows(nextState.nodes))
     setEdges(nextState.edges)
     void setCanvasViewport(nextState.viewport)
 
@@ -867,6 +965,15 @@ function PipelineEditor() {
     setNodeLogs({})
     setActiveNodeLogId(null)
   }, [])
+
+  const handleAddExecutionLogToAssistant = useCallback((detail: ExecutionDetail) => {
+    setAssistantLogAttachment(buildAssistantLogAttachment(detail))
+    addToast({
+      type: 'success',
+      title: 'Execution log attached',
+      message: 'The selected run is now available below the live assistant composer.',
+    })
+  }, [addToast])
 
   useEffect(() => {
     if (activeNodeLogId && !nodeLogs[activeNodeLogId]) {
@@ -2139,6 +2246,7 @@ function PipelineEditor() {
                   isOpen={showExecutionLog}
                   onClose={handleCloseExecutionLog}
                   onExecutionSelect={handleExecutionHighlight}
+                  onAddToAssistant={handleAddExecutionLogToAssistant}
                 />
               </Panel>
             )}
@@ -2173,6 +2281,7 @@ function PipelineEditor() {
                 selected_node_ids: selectedNodeIds,
               }}
               providers={llmProviders}
+              injectedLogAttachment={assistantLogAttachment}
               onApplyOperations={handleApplyAssistantOperations}
               onEditLockChange={setAssistantEditLockActive}
             />

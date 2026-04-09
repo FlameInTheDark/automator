@@ -88,6 +88,9 @@ func main() {
 		log.Printf("failed to resolve skills directory: %v", err)
 		skillsDir = filepath.Join(workingDir, ".agents", "skills")
 	}
+	if err := skills.EnsureBundledDefaults(skillsDir); err != nil {
+		log.Printf("failed to seed bundled skills: %v", err)
+	}
 	log.Printf("loading local skills from %s", skillsDir)
 
 	skillStore := skills.NewStore(skillsDir, 2*time.Second)

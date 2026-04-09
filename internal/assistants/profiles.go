@@ -21,7 +21,7 @@ type Module struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Content     string `json:"content"`
+	SkillName   string `json:"skill_name"`
 }
 
 type Profile struct {
@@ -45,89 +45,38 @@ var moduleCatalog = []Module{
 	{
 		ID:          "pipeline_graph_rules",
 		Name:        "Pipeline Graph Rules",
-		Description: "Validation rules for valid node and edge structures.",
-		Content: strings.TrimSpace(`
-Pipelines use React Flow style JSON with nodes, edges, and an optional viewport.
-
-Rules:
-- Only one logic:return node is allowed in a pipeline.
-- Trigger nodes start flows and cannot have incoming normal edges.
-- Tool nodes are not part of the main execution chain.
-- tool:* nodes can only be connected from an llm:agent node using sourceHandle "tool".
-- Never connect a tool node with a normal edge.
-- Visual group nodes are layout-only and cannot have incoming or outgoing edges.
-- Return nodes cannot have outgoing edges.
-- Preserve existing node and edge ids when editing unless there is a strong reason to replace them.
-`),
+		Description: "Validation rules for legal node and edge structures, branch handles, and safe live edits.",
+		SkillName:   "pipeline-graph-rules",
 	},
 	{
 		ID:          "node_catalog",
 		Name:        "Node Catalog",
-		Description: "Compact reference for the available pipeline node categories.",
-		Content: strings.TrimSpace(`
-Important node categories:
-- Triggers: trigger:manual, trigger:cron, trigger:webhook, trigger:channel_message
-- Actions: action:http, action:shell_command, action:lua, action:pipeline_get, action:pipeline_run
-- Logic: logic:condition, logic:switch, logic:merge, logic:aggregate, logic:return
-- LLM: llm:prompt, llm:agent
-- Tools: tool:http, tool:shell_command, tool:pipeline_list, tool:pipeline_get, tool:pipeline_create, tool:pipeline_update, tool:pipeline_delete, tool:pipeline_run
-- Infrastructure nodes also exist for Proxmox and Kubernetes
-- visual:group is a canvas-only grouping node and does not affect execution
-
-Use labels that clearly describe the node intent.
-`),
+		Description: "Compact reference for important node families, common roles, and when to use each category.",
+		SkillName:   "node-catalog",
 	},
 	{
 		ID:          "templating_guide",
 		Name:        "Templating Guide",
-		Description: "How string interpolation works in node config values.",
-		Content: strings.TrimSpace(`
-String templates use {{ ... }} expressions.
-
-Examples:
-- {{input}}
-- {{input.nodes}}
-- {{input.nodes[0].status}}
-
-Behavior:
-- Templates resolve against the current input object.
-- input is always available as the full current payload.
-- Top-level input keys are also exposed directly in the template context.
-- Templates are rendered recursively in string fields inside node config.
-- Missing paths cause template rendering errors.
-`),
+		Description: "How {{template}} interpolation resolves runtime data, pipeline params, and arguments.<name> values.",
+		SkillName:   "templating-guide",
+	},
+	{
+		ID:          "lua_scripting_guide",
+		Name:        "Lua Scripting Guide",
+		Description: "How action:lua uses the global input value, Lua table conversion, and return-value mapping.",
+		SkillName:   "lua-scripting-guide",
 	},
 	{
 		ID:          "logic_expression_guide",
 		Name:        "Logic Expression Guide",
-		Description: "How expressions for condition and switch logic are evaluated.",
-		Content: strings.TrimSpace(`
-logic:condition and condition-based logic:switch expressions are evaluated with expr-lang.
-
-Behavior:
-- The environment includes input as the full payload.
-- Top-level input keys are also exposed directly in the expression environment.
-- Expressions must evaluate to a boolean value.
-- Templating is rendered before expression evaluation.
-
-Examples:
-- input.status == "ready"
-- retries > 3
-- input.cluster == "prod" && input.enabled == true
-`),
+		Description: "Rules and examples for expr-based condition and switch logic.",
+		SkillName:   "logic-expression-guide",
 	},
 	{
 		ID:          "llm_tool_edge_rules",
 		Name:        "LLM Tool Edge Rules",
-		Description: "Connection rules specific to llm:agent tool nodes.",
-		Content: strings.TrimSpace(`
-Tool connection rules:
-- Only llm:agent can connect to tool:* nodes.
-- The connection must use sourceHandle "tool" on the llm:agent node.
-- Tool nodes cannot appear in the main execution chain.
-- Normal action or logic nodes must not target tool nodes.
-- If you add or move tool nodes, ensure their edges still use the tool handle rule.
-`),
+		Description: "Connection rules for llm:agent tool nodes and the dedicated tool handle.",
+		SkillName:   "llm-tool-edge-rules",
 	},
 }
 
@@ -147,13 +96,7 @@ Treat the browser-provided pipeline snapshot as the source of truth because it m
 Prefer precise, minimal changes and preserve existing node and edge ids whenever possible.
 When the user asks for something that requires the other mode, explicitly tell them to switch modes instead of pretending the action succeeded.
 `),
-			EnabledModules: []string{
-				"pipeline_graph_rules",
-				"node_catalog",
-				"templating_guide",
-				"logic_expression_guide",
-				"llm_tool_edge_rules",
-			},
+			EnabledModules: preferredEnabledModules(scope),
 		}
 	case ScopeChatWindow:
 		return Profile{
@@ -162,13 +105,13 @@ When the user asks for something that requires the other mode, explicitly tell t
 You are an automation assistant for infrastructure and Automator pipelines.
 Use the available tools to manage enabled integrations, inspect local skills, run shell commands when appropriate, and create, edit, run, activate, or deactivate pipelines when the user asks.
 `),
-			EnabledModules: []string{},
+			EnabledModules: preferredEnabledModules(scope),
 		}
 	default:
 		return Profile{
 			Scope:              scope,
 			SystemInstructions: "",
-			EnabledModules:     []string{},
+			EnabledModules:     preferredEnabledModules(scope),
 		}
 	}
 }
@@ -197,11 +140,52 @@ func BuildPromptAppendix(profile Profile) string {
 		sections = append(sections, instructions)
 	}
 
-	for _, module := range ResolveModules(profile.EnabledModules) {
-		sections = append(sections, strings.TrimSpace(module.Name+":\n"+module.Content))
+	if skillSection := BuildEnabledSkillSection(profile.EnabledModules); skillSection != "" {
+		sections = append(sections, skillSection)
 	}
 
 	return strings.TrimSpace(strings.Join(sections, "\n\n"))
+}
+
+func BuildEnabledSkillSection(ids []string) string {
+	modules := ResolveModules(ids)
+	if len(modules) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(modules)+1)
+	lines = append(lines, "Preferred assistant skills:")
+	for _, module := range modules {
+		name := strings.TrimSpace(module.SkillName)
+		if name == "" {
+			name = module.ID
+		}
+		line := "- " + name
+		if description := strings.TrimSpace(module.Description); description != "" {
+			line += ": " + description
+		}
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func SkillNamesForModules(ids []string) []string {
+	modules := ResolveModules(ids)
+	names := make([]string, 0, len(modules))
+	seen := make(map[string]struct{}, len(modules))
+	for _, module := range modules {
+		name := strings.TrimSpace(module.SkillName)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
 }
 
 func (s *Store) Get(ctx context.Context, scope Scope) (Profile, error) {
@@ -230,7 +214,7 @@ func (s *Store) Get(ctx context.Context, scope Scope) (Profile, error) {
 	if instructions := strings.TrimSpace(stored.SystemInstructions); instructions != "" {
 		profile.SystemInstructions = instructions
 	}
-	profile.EnabledModules = NormalizeEnabledModules(stored.EnabledModules)
+	profile.EnabledModules = preferredEnabledModules(scope)
 	profile.CreatedAt = &config.CreatedAt
 	profile.UpdatedAt = &config.UpdatedAt
 
@@ -247,7 +231,7 @@ func (s *Store) Set(ctx context.Context, scope Scope, profile Profile) (Profile,
 
 	payload := storedProfile{
 		SystemInstructions: strings.TrimSpace(profile.SystemInstructions),
-		EnabledModules:     NormalizeEnabledModules(profile.EnabledModules),
+		EnabledModules:     preferredEnabledModules(scope),
 	}
 
 	encoded, err := json.Marshal(payload)
@@ -292,6 +276,34 @@ func NormalizeEnabledModules(ids []string) []string {
 	}
 
 	return normalized
+}
+
+func preferredEnabledModules(scope Scope) []string {
+	var modules []string
+
+	switch scope {
+	case ScopePipelineEditor:
+		modules = []string{
+			"pipeline_graph_rules",
+			"node_catalog",
+			"templating_guide",
+			"lua_scripting_guide",
+			"logic_expression_guide",
+			"llm_tool_edge_rules",
+		}
+	case ScopeChatWindow:
+		modules = []string{}
+	default:
+		modules = []string{}
+	}
+
+	if len(modules) == 0 {
+		return nil
+	}
+
+	out := make([]string, len(modules))
+	copy(out, modules)
+	return out
 }
 
 func ValidateScope(scope Scope) error {

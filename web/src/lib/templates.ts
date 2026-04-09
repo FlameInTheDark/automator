@@ -7,6 +7,12 @@ type NodeOutputHint = {
   description?: string
 }
 
+const SAMPLE_STRING_LIMIT = 1200
+const SAMPLE_PREVIEW_LIMIT = 220
+const SAMPLE_ARRAY_LIMIT = 6
+const SAMPLE_OBJECT_LIMIT = 12
+const SAMPLE_DEPTH_LIMIT = 4
+
 const NODE_OUTPUT_HINTS: Partial<Record<NodeType, NodeOutputHint[]>> = {
   'action:proxmox_list_nodes': [
     { expression: 'input.clusterId', label: 'Cluster ID' },
@@ -219,6 +225,7 @@ function addSuggestion(
     template: `{{${expression}}}`,
     label,
     description,
+    kind: 'template',
   })
 }
 
@@ -243,6 +250,134 @@ function mergeSourceOutputs(outputs: unknown[]): Record<string, unknown> {
     }
     return acc
   }, {})
+}
+
+function truncatePlainText(value: string, limit: number): string {
+  if (value.length <= limit) {
+    return value
+  }
+
+  return `${value.slice(0, limit)}... [truncated ${value.length - limit} chars]`
+}
+
+function compactSampleValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return truncatePlainText(value, SAMPLE_STRING_LIMIT)
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) {
+    return value
+  }
+
+  if (depth >= SAMPLE_DEPTH_LIMIT) {
+    if (Array.isArray(value)) {
+      return `[array truncated, ${value.length} item(s)]`
+    }
+
+    if (isObject(value)) {
+      return '[object truncated]'
+    }
+  }
+
+  if (Array.isArray(value)) {
+    const next = value
+      .slice(0, SAMPLE_ARRAY_LIMIT)
+      .map((item) => compactSampleValue(item, depth + 1))
+
+    if (value.length > SAMPLE_ARRAY_LIMIT) {
+      next.push(`... ${value.length - SAMPLE_ARRAY_LIMIT} more item(s) omitted`)
+    }
+
+    return next
+  }
+
+  if (!isObject(value)) {
+    return String(value)
+  }
+
+  const entries = Object.entries(value)
+  const next = entries
+    .slice(0, SAMPLE_OBJECT_LIMIT)
+    .reduce<Record<string, unknown>>((acc, [key, child]) => {
+      acc[key] = compactSampleValue(child, depth + 1)
+      return acc
+    }, {})
+
+  if (entries.length > SAMPLE_OBJECT_LIMIT) {
+    next._truncated = `${entries.length - SAMPLE_OBJECT_LIMIT} more field(s) omitted`
+  }
+
+  return next
+}
+
+function renderSampleBlock(value: unknown, heading: string): { template: string; preview: string } | null {
+  if (value === undefined) {
+    return null
+  }
+
+  const compactValue = compactSampleValue(value)
+  const isStructured = Array.isArray(compactValue) || isObject(compactValue) || typeof compactValue === 'number' || typeof compactValue === 'boolean' || compactValue === null
+  const language = isStructured ? 'json' : 'text'
+  const renderedValue = isStructured
+    ? JSON.stringify(compactValue, null, 2)
+    : truncatePlainText(String(compactValue), SAMPLE_STRING_LIMIT)
+
+  if (!renderedValue) {
+    return null
+  }
+
+  const fence = renderedValue.includes('```') ? '~~~' : '```'
+
+  return {
+    template: `${heading}\n${fence}${language}\n${renderedValue}\n${fence}\n`,
+    preview: truncatePlainText(renderedValue, SAMPLE_PREVIEW_LIMIT),
+  }
+}
+
+function buildPromptSampleSuggestions(
+  selectedNodeId: string,
+  latestNodeExecutions: NodeExecution[],
+  mergedOutput: Record<string, unknown>,
+): TemplateSuggestion[] {
+  const currentExecution = latestNodeExecutions.find((execution) => execution.node_id === selectedNodeId)
+  const currentInput = parseExecutionJSON(currentExecution?.input)
+  const currentSample = renderSampleBlock(
+    currentInput,
+    'Example runtime input for this node from the latest execution:',
+  )
+
+  if (currentSample) {
+    return [{
+      expression: 'sample.current_input',
+      template: currentSample.template,
+      label: 'Latest input sample',
+      description: 'Insert a compact snapshot of the latest recorded input payload for this node.',
+      kind: 'sample',
+      preview: currentSample.preview,
+    }]
+  }
+
+  if (Object.keys(mergedOutput).length === 0) {
+    return []
+  }
+
+  const mergedSample = renderSampleBlock(
+    mergedOutput,
+    'Example merged input built from the latest upstream execution data:',
+  )
+
+  if (!mergedSample) {
+    return []
+  }
+
+  return [{
+    expression: 'sample.merged_input',
+    template: mergedSample.template,
+    label: 'Merged input sample',
+    description: 'Insert an approximate input example assembled from the latest upstream node outputs.',
+    kind: 'sample',
+    preview: mergedSample.preview,
+  }]
 }
 
 export function buildTemplateSuggestions(
@@ -284,4 +419,29 @@ export function buildTemplateSuggestions(
   })
 
   return results
+}
+
+export function buildPromptInsertSuggestions(
+  selectedNodeId: string,
+  nodes: Node[],
+  edges: Edge[],
+  latestNodeExecutions: NodeExecution[] = [],
+): TemplateSuggestion[] {
+  const templateSuggestions = buildTemplateSuggestions(selectedNodeId, nodes, edges, latestNodeExecutions)
+  const incomingEdges = edges.filter((edge) => edge.target === selectedNodeId)
+  const sourceNodes = incomingEdges
+    .map((edge) => nodes.find((node) => node.id === edge.source))
+    .filter((node): node is Node => !!node)
+
+  const latestOutputs = sourceNodes
+    .map((node) => latestNodeExecutions.find((execution) => execution.node_id === node.id))
+    .map((execution) => parseExecutionJSON(execution?.output))
+    .filter((value): value is Record<string, unknown> => isObject(value))
+
+  const mergedOutput = mergeSourceOutputs(latestOutputs)
+
+  return [
+    ...templateSuggestions,
+    ...buildPromptSampleSuggestions(selectedNodeId, latestNodeExecutions, mergedOutput),
+  ]
 }

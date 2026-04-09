@@ -2,32 +2,26 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../../api/client'
-import { ASSISTANT_MODULES, ASSISTANT_SCOPE_LABELS } from '../../lib/assistantProfiles'
+import { ASSISTANT_SCOPE_LABELS } from '../../lib/assistantProfiles'
 import { useUIStore } from '../../store/ui'
 import Button from '../ui/Button'
 import Skeleton from '../ui/Skeleton'
 import { Card, CardContent } from '../ui/Card'
-import { Checkbox, Label, Textarea } from '../ui/Form'
+import { Label, Textarea } from '../ui/Form'
 import { cn } from '../../lib/utils'
-import type { AssistantModuleId, AssistantProfile, AssistantProfileScope } from '../../types'
+import type { AssistantProfile, AssistantProfileScope } from '../../types'
 
 type ProfileDraft = {
   system_instructions: string
-  enabled_modules: AssistantModuleId[]
-}
-
-const PROFILE_SCOPES: AssistantProfileScope[] = ['pipeline_editor', 'chat_window']
-
-function normalizeEnabledModules(value: AssistantModuleId[] | null | undefined): AssistantModuleId[] {
-  return Array.isArray(value) ? value.filter((item): item is AssistantModuleId => typeof item === 'string') : []
 }
 
 function createDraft(profile: AssistantProfile): ProfileDraft {
   return {
     system_instructions: profile.system_instructions ?? '',
-    enabled_modules: normalizeEnabledModules(profile.enabled_modules),
   }
 }
+
+const PROFILE_SCOPES: AssistantProfileScope[] = ['pipeline_editor', 'chat_window']
 
 export default function AssistantProfilesSettings() {
   const queryClient = useQueryClient()
@@ -114,7 +108,6 @@ export default function AssistantProfilesSettings() {
     setDrafts((current) => {
       const existing = current[activeScope] ?? {
         system_instructions: '',
-        enabled_modules: [],
       }
 
       return {
@@ -122,15 +115,6 @@ export default function AssistantProfilesSettings() {
         [activeScope]: updater(existing),
       }
     })
-  }
-
-  function handleToggleModule(moduleId: AssistantModuleId) {
-    updateDraft((draft) => ({
-      ...draft,
-      enabled_modules: draft.enabled_modules.includes(moduleId)
-        ? draft.enabled_modules.filter((id) => id !== moduleId)
-        : draft.enabled_modules.concat(moduleId),
-    }))
   }
 
   if (isLoading && !currentDraft) {
@@ -147,7 +131,7 @@ export default function AssistantProfilesSettings() {
       <div>
         <h2 className="text-lg font-semibold text-text">AI Assistants</h2>
         <p className="mt-1 text-sm text-text-muted">
-          Edit the default instructions and built-in knowledge modules for the node editor assistant and the main chat window.
+          Edit the default instructions used by the node editor assistant and the main chat window.
         </p>
       </div>
 
@@ -175,8 +159,8 @@ export default function AssistantProfilesSettings() {
         <CardContent className="space-y-5 px-6 py-6">
           <div className="rounded-xl border border-border bg-bg-input/60 px-4 py-3 text-sm text-text-muted">
             {activeScope === 'pipeline_editor'
-              ? 'Model selection stays in the node editor panel. These settings control the base prompt and built-in graph documentation.'
-              : 'Model and infrastructure selections still live in each chat conversation. These settings control the shared chat prompt profile.'}
+              ? 'Model selection stays in the node editor panel. Local assistant skills are discovered from .agents/skills and read on demand when the model needs them. These settings only control the base prompt profile.'
+              : 'Model and infrastructure selections still live in each chat conversation. Local assistant skills are discovered from .agents/skills and read on demand when needed. These settings only control the shared chat prompt profile.'}
           </div>
 
           <div className="space-y-2">
@@ -188,33 +172,6 @@ export default function AssistantProfilesSettings() {
               onChange={(event) => updateDraft((draft) => ({ ...draft, system_instructions: event.target.value }))}
               className="min-h-[16rem]"
             />
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <Label className="mb-0">Built-in Knowledge Modules</Label>
-              <p className="mt-1 text-sm text-text-muted">
-                Toggle the built-in graph and expression references that are injected into this assistant profile.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              {ASSISTANT_MODULES.map((module) => (
-                <label
-                  key={module.id}
-                  className="flex items-start gap-3 rounded-xl border border-border bg-bg-input/50 px-4 py-3"
-                >
-                  <Checkbox
-                    checked={Boolean(currentDraft?.enabled_modules?.includes(module.id))}
-                    onChange={() => handleToggleModule(module.id)}
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-text">{module.name}</div>
-                    <p className="mt-1 text-sm text-text-muted">{module.description}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3">

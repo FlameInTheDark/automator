@@ -128,6 +128,7 @@ docker compose up --build -d
 ```
 
 The compose file stores SQLite data in the `automator-data` named volume and exposes the app on port `8080`.
+It also stores the container-local `.agents` directory in the `automator-agents` named volume so bundled/default skills and any custom workspace skills persist across restarts.
 
 Published images are expected at:
 

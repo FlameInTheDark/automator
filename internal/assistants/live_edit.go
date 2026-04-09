@@ -104,7 +104,7 @@ func applyOperation(snapshot PipelineSnapshot, operation LivePipelineOperation) 
 
 	switch strings.TrimSpace(operation.Type) {
 	case "add_nodes":
-		nodes, err := normalizeNodes(operation.Nodes)
+		nodes, err := normalizeNodes(operation.Nodes, true)
 		if err != nil {
 			return LivePipelineOperation{}, PipelineSnapshot{}, err
 		}
@@ -118,7 +118,7 @@ func applyOperation(snapshot PipelineSnapshot, operation LivePipelineOperation) 
 		}
 		return LivePipelineOperation{Type: "add_nodes", Nodes: nodes}, working, nil
 	case "update_nodes":
-		nodes, err := normalizeNodes(operation.Nodes)
+		nodes, err := normalizeUpdatedNodes(working.Nodes, operation.Nodes)
 		if err != nil {
 			return LivePipelineOperation{}, PipelineSnapshot{}, err
 		}
@@ -177,7 +177,7 @@ func applyOperation(snapshot PipelineSnapshot, operation LivePipelineOperation) 
 		working.Edges = filteredEdges
 		return LivePipelineOperation{Type: "delete_nodes", NodeIDs: nodeIDs}, working, nil
 	case "add_edges":
-		edges, err := normalizeEdges(operation.Edges)
+		edges, err := normalizeEdges(operation.Edges, true)
 		if err != nil {
 			return LivePipelineOperation{}, PipelineSnapshot{}, err
 		}
@@ -191,7 +191,7 @@ func applyOperation(snapshot PipelineSnapshot, operation LivePipelineOperation) 
 		}
 		return LivePipelineOperation{Type: "add_edges", Edges: edges}, working, nil
 	case "update_edges":
-		edges, err := normalizeEdges(operation.Edges)
+		edges, err := normalizeUpdatedEdges(working.Edges, operation.Edges)
 		if err != nil {
 			return LivePipelineOperation{}, PipelineSnapshot{}, err
 		}
@@ -254,7 +254,7 @@ func validateSnapshot(snapshot PipelineSnapshot) error {
 	return nil
 }
 
-func normalizeNodes(nodes []map[string]any) ([]map[string]any, error) {
+func normalizeNodes(nodes []map[string]any, requirePosition bool) ([]map[string]any, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("nodes are required")
 	}
@@ -274,11 +274,56 @@ func normalizeNodes(nodes []map[string]any) ([]map[string]any, error) {
 		}
 		seen[id] = struct{}{}
 		normalized[index]["id"] = id
+		if err := normalizeNodeForCanvas(normalized[index], requirePosition); err != nil {
+			return nil, err
+		}
 	}
 	return normalized, nil
 }
 
-func normalizeEdges(edges []map[string]any) ([]map[string]any, error) {
+func normalizeUpdatedNodes(existing []map[string]any, patches []map[string]any) ([]map[string]any, error) {
+	if len(patches) == 0 {
+		return nil, fmt.Errorf("nodes are required")
+	}
+
+	normalizedPatches, err := cloneJSONValue(patches)
+	if err != nil {
+		return nil, fmt.Errorf("clone nodes: %w", err)
+	}
+
+	byID := indexByID(existing)
+	normalized := make([]map[string]any, 0, len(normalizedPatches))
+	seen := make(map[string]struct{}, len(normalizedPatches))
+
+	for index := range normalizedPatches {
+		id, err := extractID(normalizedPatches[index], "node")
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[id]; exists {
+			return nil, fmt.Errorf("duplicate node id %q in operation payload", id)
+		}
+		seen[id] = struct{}{}
+
+		existingIndex, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("node %q was not found", id)
+		}
+
+		merged, err := mergeJSONObjects(existing[existingIndex], normalizedPatches[index])
+		if err != nil {
+			return nil, fmt.Errorf("merge node %q update: %w", id, err)
+		}
+		if err := normalizeNodeForCanvas(merged, false); err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, merged)
+	}
+
+	return normalized, nil
+}
+
+func normalizeEdges(edges []map[string]any, requireEndpoints bool) ([]map[string]any, error) {
 	if len(edges) == 0 {
 		return nil, fmt.Errorf("edges are required")
 	}
@@ -293,21 +338,23 @@ func normalizeEdges(edges []map[string]any) ([]map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		source, err := extractRequiredString(normalized[index], "source", "edge")
-		if err != nil {
-			return nil, err
-		}
-		target, err := extractRequiredString(normalized[index], "target", "edge")
-		if err != nil {
-			return nil, err
-		}
 		if _, exists := seen[id]; exists {
 			return nil, fmt.Errorf("duplicate edge id %q in operation payload", id)
 		}
 		seen[id] = struct{}{}
 		normalized[index]["id"] = id
-		normalized[index]["source"] = source
-		normalized[index]["target"] = target
+		if requireEndpoints {
+			source, err := extractRequiredString(normalized[index], "source", "edge")
+			if err != nil {
+				return nil, err
+			}
+			target, err := extractRequiredString(normalized[index], "target", "edge")
+			if err != nil {
+				return nil, err
+			}
+			normalized[index]["source"] = source
+			normalized[index]["target"] = target
+		}
 		if handle, ok := normalized[index]["sourceHandle"]; ok {
 			handleValue, ok := handle.(string)
 			if !ok {
@@ -316,6 +363,47 @@ func normalizeEdges(edges []map[string]any) ([]map[string]any, error) {
 			normalized[index]["sourceHandle"] = strings.TrimSpace(handleValue)
 		}
 	}
+	return normalized, nil
+}
+
+func normalizeUpdatedEdges(existing []map[string]any, patches []map[string]any) ([]map[string]any, error) {
+	if len(patches) == 0 {
+		return nil, fmt.Errorf("edges are required")
+	}
+
+	normalizedPatches, err := normalizeEdges(patches, false)
+	if err != nil {
+		return nil, err
+	}
+
+	byID := indexByID(existing)
+	normalized := make([]map[string]any, 0, len(normalizedPatches))
+
+	for _, patch := range normalizedPatches {
+		id, _ := extractID(patch, "edge")
+		existingIndex, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("edge %q was not found", id)
+		}
+
+		merged, err := mergeJSONObjects(existing[existingIndex], patch)
+		if err != nil {
+			return nil, fmt.Errorf("merge edge %q update: %w", id, err)
+		}
+
+		source, err := extractRequiredString(merged, "source", "edge")
+		if err != nil {
+			return nil, err
+		}
+		target, err := extractRequiredString(merged, "target", "edge")
+		if err != nil {
+			return nil, err
+		}
+		merged["source"] = source
+		merged["target"] = target
+		normalized = append(normalized, merged)
+	}
+
 	return normalized, nil
 }
 
@@ -423,6 +511,72 @@ func extractRequiredNumber(item map[string]any, field string, label string) (flo
 	default:
 		return 0, fmt.Errorf("%s %s must be a number", label, field)
 	}
+}
+
+func normalizeNodeForCanvas(node map[string]any, requirePosition bool) error {
+	if rawType, ok := node["type"]; ok {
+		typeValue, ok := rawType.(string)
+		if !ok {
+			return fmt.Errorf("node type must be a string")
+		}
+		trimmedType := strings.TrimSpace(typeValue)
+		if trimmedType == "" {
+			return fmt.Errorf("node type must not be empty")
+		}
+		node["type"] = trimmedType
+	} else {
+		node["type"] = "automator"
+	}
+
+	positionRaw, hasPosition := node["position"]
+	if !hasPosition {
+		if requirePosition {
+			return fmt.Errorf("node position is required")
+		}
+		return nil
+	}
+
+	position, ok := positionRaw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("node position must be an object")
+	}
+	x, err := extractRequiredNumber(position, "x", "node position")
+	if err != nil {
+		return err
+	}
+	y, err := extractRequiredNumber(position, "y", "node position")
+	if err != nil {
+		return err
+	}
+	node["position"] = map[string]any{
+		"x": x,
+		"y": y,
+	}
+	return nil
+}
+
+func mergeJSONObjects(base map[string]any, patch map[string]any) (map[string]any, error) {
+	merged, err := cloneJSONValue(base)
+	if err != nil {
+		return nil, err
+	}
+
+	for key, patchValue := range patch {
+		if patchMap, ok := patchValue.(map[string]any); ok {
+			if baseMap, ok := merged[key].(map[string]any); ok {
+				nested, err := mergeJSONObjects(baseMap, patchMap)
+				if err != nil {
+					return nil, err
+				}
+				merged[key] = nested
+				continue
+			}
+		}
+
+		merged[key] = patchValue
+	}
+
+	return merged, nil
 }
 
 func cloneJSONValue[T any](value T) (T, error) {

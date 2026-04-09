@@ -111,9 +111,14 @@ export default function LuaEditorModal({ value, suggestions, onSave, onClose }: 
         </div>
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
-          <p className="text-sm text-text-muted">
-            Edit the script in a larger workspace and insert pipeline templates at the cursor position.
-          </p>
+          <div className="min-w-0">
+            <p className="text-sm text-text-muted">
+              Edit the script in a larger workspace and insert pipeline templates at the cursor position.
+            </p>
+            <p className="mt-1 text-xs text-text-dimmed">
+              The script runs directly, so read runtime data from <span className="font-mono text-text">input</span>, prefer <span className="font-mono text-text">input.field</span> over implicit globals, remember Lua arrays are 1-based, and return a table for structured output.
+            </p>
+          </div>
           <TemplateInsertButton suggestions={suggestions} onInsert={handleInsertTemplate} />
         </div>
 

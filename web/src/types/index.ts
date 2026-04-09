@@ -277,6 +277,7 @@ export type AssistantModuleId =
   | 'pipeline_graph_rules'
   | 'node_catalog'
   | 'templating_guide'
+  | 'lua_scripting_guide'
   | 'logic_expression_guide'
   | 'llm_tool_edge_rules'
 
@@ -311,6 +312,28 @@ export interface EditorAssistantPipelineSnapshot {
   viewport?: Viewport
 }
 
+export interface EditorAssistantExecutionLogNode {
+  node_id: string
+  node_type: string
+  status: string
+  input?: unknown
+  output?: unknown
+  error?: string
+}
+
+export interface EditorAssistantExecutionLogAttachment {
+  id: string
+  execution: {
+    id: string
+    trigger_type: string
+    status: string
+    started_at: string
+    completed_at?: string
+    error?: string
+  }
+  nodes: EditorAssistantExecutionLogNode[]
+}
+
 export interface EditorAssistantRequest {
   provider_id?: string
   mode: EditorAssistantMode
@@ -318,6 +341,7 @@ export interface EditorAssistantRequest {
   messages: EditorAssistantMessage[]
   pipeline: EditorAssistantPipelineSnapshot
   selection: EditorAssistantSelection
+  attached_log?: EditorAssistantExecutionLogAttachment
 }
 
 export type LivePipelineOperationType =
@@ -465,6 +489,9 @@ export interface TemplateSuggestion {
   expression: string
   label: string
   description?: string
+  kind?: 'template' | 'sample'
+  preview?: string
+  badge?: string
 }
 
 export type NodeType =

@@ -538,14 +538,26 @@ export const NODE_TYPE_MAP: Record<NodeType, NodeTypeDefinition> = [...NODE_CATE
   {} as Record<NodeType, NodeTypeDefinition>,
 )
 
-export function getNodeColor(type: NodeType): string {
-  return NODE_TYPE_MAP[type]?.color || '#6b7280'
+export function getNodeColor(type?: string): string {
+  if (typeof type !== 'string' || !type) {
+    return '#6b7280'
+  }
+
+  return NODE_TYPE_MAP[type as NodeType]?.color || '#6b7280'
 }
 
-export function getNodeLabel(type: NodeType): string {
-  return NODE_TYPE_MAP[type]?.label || type
+export function getNodeLabel(type?: string): string {
+  if (typeof type !== 'string' || !type) {
+    return 'Unknown node type'
+  }
+
+  return NODE_TYPE_MAP[type as NodeType]?.label || type
 }
 
-export function getNodeIcon(type: NodeType): string {
-  return NODE_TYPE_MAP[type]?.icon || 'circle'
+export function getNodeIcon(type?: string): string {
+  if (typeof type !== 'string' || !type) {
+    return 'circle'
+  }
+
+  return NODE_TYPE_MAP[type as NodeType]?.icon || 'circle'
 }

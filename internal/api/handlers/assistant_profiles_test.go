@@ -66,7 +66,6 @@ func TestAssistantProfileHandlerReturnsDefaultsAndPersistsUpdates(t *testing.T) 
 
 	updateRes := performJSONRequest(t, app, http.MethodPut, "/assistant-profiles/pipeline_editor", map[string]any{
 		"system_instructions": "Use concise answers.",
-		"enabled_modules":     []string{"pipeline_graph_rules"},
 	})
 	if updateRes.StatusCode != fiber.StatusOK {
 		t.Fatalf("update status = %d, want %d", updateRes.StatusCode, fiber.StatusOK)
@@ -79,8 +78,14 @@ func TestAssistantProfileHandlerReturnsDefaultsAndPersistsUpdates(t *testing.T) 
 	if updated.SystemInstructions != "Use concise answers." {
 		t.Fatalf("system instructions = %q, want %q", updated.SystemInstructions, "Use concise answers.")
 	}
-	if len(updated.EnabledModules) != 1 || updated.EnabledModules[0] != "pipeline_graph_rules" {
-		t.Fatalf("enabled modules = %+v, want [pipeline_graph_rules]", updated.EnabledModules)
+	defaultModules := assistants.DefaultProfile(assistants.ScopePipelineEditor).EnabledModules
+	if len(updated.EnabledModules) != len(defaultModules) {
+		t.Fatalf("enabled modules = %+v, want %+v", updated.EnabledModules, defaultModules)
+	}
+	for index := range defaultModules {
+		if updated.EnabledModules[index] != defaultModules[index] {
+			t.Fatalf("enabled modules = %+v, want %+v", updated.EnabledModules, defaultModules)
+		}
 	}
 
 	restoreRes := performJSONRequest(t, app, http.MethodPost, "/assistant-profiles/pipeline_editor/restore-defaults", nil)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clock, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, Terminal, Crosshair, Square } from 'lucide-react'
+import { Clock, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronRight, Terminal, Square, Brain } from 'lucide-react'
 import { api } from '../../api/client'
 import { cn, formatDate } from '../../lib/utils'
 import type { ActiveExecution, Execution, ExecutionDetail, NodeExecution, NodeExecutionLogData } from '../../types'
@@ -33,6 +33,7 @@ interface ExecutionLogProps {
     nodeErrors: Record<string, string | undefined>
     nodeLogs: Record<string, NodeExecutionLogData>
   } | null) => void
+  onAddToAssistant?: (detail: ExecutionDetail) => void
 }
 
 function parseExecutionValue(value?: string): unknown {
@@ -228,7 +229,13 @@ function updateExecutionDetailFromEvent(
   }
 }
 
-export default function ExecutionLog({ pipelineId, isOpen, onClose, onExecutionSelect }: ExecutionLogProps) {
+export default function ExecutionLog({
+  pipelineId,
+  isOpen,
+  onClose,
+  onExecutionSelect,
+  onAddToAssistant,
+}: ExecutionLogProps) {
   const queryClient = useQueryClient()
   const { addToast } = useUIStore()
   const [selectedExecution, setSelectedExecution] = useState<string | null>(null)
@@ -368,7 +375,11 @@ export default function ExecutionLog({ pipelineId, isOpen, onClose, onExecutionS
     return `${(ms / 1000).toFixed(1)}s`
   }
 
-  const handleHighlight = async (executionId: string) => {
+  const handleAddToAssistant = async (executionId: string) => {
+    if (!onAddToAssistant) {
+      return
+    }
+
     const detail = selectedExecution === executionId && executionDetail
       ? executionDetail
       : await queryClient.fetchQuery<ExecutionDetail>({
@@ -376,7 +387,7 @@ export default function ExecutionLog({ pipelineId, isOpen, onClose, onExecutionS
           queryFn: () => api.executions.get(executionId) as Promise<ExecutionDetail>,
         })
 
-    onExecutionSelect?.(buildExecutionSelection(detail))
+    onAddToAssistant(detail)
   }
 
   if (!isOpen) return null
@@ -388,9 +399,27 @@ export default function ExecutionLog({ pipelineId, isOpen, onClose, onExecutionS
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h3 className="text-sm font-semibold text-text">Execution Log</h3>
-        <button onClick={onClose} className="text-text-dimmed hover:text-text transition-colors">
-          <XCircle className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          {onAddToAssistant && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!selectedExecution}
+              title="Add selected run to agent"
+              aria-label="Add selected run to agent"
+              onClick={() => {
+                if (selectedExecution) {
+                  void handleAddToAssistant(selectedExecution)
+                }
+              }}
+            >
+              <Brain className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          <button onClick={onClose} className="text-text-dimmed hover:text-text transition-colors">
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Execution List */}
@@ -448,17 +477,22 @@ export default function ExecutionLog({ pipelineId, isOpen, onClose, onExecutionS
                         </span>
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-2">
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setSelectedExecution(execution.execution_id)
-                            void handleHighlight(execution.execution_id)
-                          }}
-                          className="text-xs text-accent hover:text-accent-hover flex items-center gap-1 transition-colors"
-                        >
-                          <Crosshair className="w-3 h-3" />
-                          Highlight in editor
-                        </button>
+                        <div className="flex items-center gap-3">
+                          {onAddToAssistant && (
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setSelectedExecution(execution.execution_id)
+                                void handleAddToAssistant(execution.execution_id)
+                              }}
+                              className="inline-flex items-center justify-center rounded-md p-1 text-accent transition-colors hover:bg-accent/10 hover:text-accent-hover"
+                              title="Add run to agent"
+                              aria-label="Add run to agent"
+                            >
+                              <Brain className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                         <Button
                           variant="danger"
                           size="sm"
@@ -523,18 +557,21 @@ export default function ExecutionLog({ pipelineId, isOpen, onClose, onExecutionS
                   {exec.error && (
                     <p className="text-xs text-red-400 mt-1 truncate">{exec.error}</p>
                   )}
-                  <div className="mt-1 flex justify-end">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelectedExecution(exec.id)
-                        void handleHighlight(exec.id)
-                      }}
-                      className="text-xs text-accent hover:text-accent-hover flex items-center gap-1 transition-colors"
-                    >
-                      <Crosshair className="w-3 h-3" />
-                      Highlight in editor
-                    </button>
+                  <div className="mt-1 flex justify-end gap-3">
+                    {onAddToAssistant && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedExecution(exec.id)
+                          void handleAddToAssistant(exec.id)
+                        }}
+                        className="inline-flex items-center justify-center rounded-md p-1 text-accent transition-colors hover:bg-accent/10 hover:text-accent-hover"
+                        title="Add run to agent"
+                        aria-label="Add run to agent"
+                      >
+                        <Brain className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </button>
               ))}

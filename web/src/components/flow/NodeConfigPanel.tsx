@@ -15,7 +15,7 @@ import { Checkbox, Label } from '../ui/Form'
 import Select from '../ui/Select'
 import Button from '../ui/Button'
 import { TemplateInput, TemplateTextarea } from '../ui/TemplateFields'
-import { buildTemplateSuggestions } from '../../lib/templates'
+import { buildPromptInsertSuggestions, buildTemplateSuggestions } from '../../lib/templates'
 import LuaEditorModal from './LuaEditorModal'
 import HelpTooltip from '../ui/HelpTooltip'
 import KubernetesNodeConfigSection, { kubernetesNodeTypes } from './KubernetesNodeConfigSection'
@@ -75,7 +75,11 @@ const pipelineMutationToolNodeTypes = new Set<NodeType>([
 const EXPR_LANGUAGE_DOCS_URL = 'https://expr-lang.org/docs/language-definition'
 const DEFAULT_GROUP_COLOR = '#64748b'
 
-function supportsNodeErrorPolicy(nodeType: NodeType): boolean {
+function supportsNodeErrorPolicy(nodeType?: string): boolean {
+  if (typeof nodeType !== 'string' || !nodeType) {
+    return false
+  }
+
   return !nodeType.startsWith('tool:')
     && nodeType !== 'visual:group'
     && nodeType !== 'logic:return'
@@ -88,7 +92,7 @@ interface NodeConfigPanelProps {
   nodes: Node[]
   edges: Edge[]
   nodeId: string
-  nodeType: NodeType
+  nodeType?: NodeType | string
   nodeLabel: string
   config: Record<string, unknown>
   onUpdate: (config: Record<string, unknown>) => void
@@ -400,18 +404,22 @@ export default function NodeConfigPanel({
     onUpdate(newConfig)
   }
 
-  const nodeDef = NODE_TYPE_MAP[nodeType]
+  const resolvedNodeType = typeof nodeType === 'string' ? nodeType : ''
+  const nodeDef = resolvedNodeType ? NODE_TYPE_MAP[resolvedNodeType as NodeType] : undefined
   const Icon = iconMap[nodeDef?.icon || 'zap']
-  const color = getNodeColor(nodeType)
-  const showClusterSelect = proxmoxNodeTypes.has(nodeType)
-  const showKubernetesClusterSelect = kubernetesNodeTypes.has(nodeType)
-  const showChannelSelect = channelNodeTypes.has(nodeType)
+  const color = getNodeColor(resolvedNodeType)
+  const showClusterSelect = proxmoxNodeTypes.has(resolvedNodeType as NodeType)
+  const showKubernetesClusterSelect = kubernetesNodeTypes.has(resolvedNodeType as NodeType)
+  const showChannelSelect = channelNodeTypes.has(resolvedNodeType as NodeType)
   const templateSuggestions = useMemo<TemplateSuggestion[]>(() => (
     buildTemplateSuggestions(nodeId, nodes, edges, latestExecutionDetail?.node_executions ?? [])
   ), [nodeId, nodes, edges, latestExecutionDetail])
+  const promptInsertSuggestions = useMemo<TemplateSuggestion[]>(() => (
+    buildPromptInsertSuggestions(nodeId, nodes, edges, latestExecutionDetail?.node_executions ?? [])
+  ), [nodeId, nodes, edges, latestExecutionDetail])
   const agentTemplateSuggestions = useMemo<TemplateSuggestion[]>(() => {
-    if (nodeType !== 'llm:agent' || !Boolean(localConfig.enableSkills)) {
-      return templateSuggestions
+    if (resolvedNodeType !== 'llm:agent' || !Boolean(localConfig.enableSkills)) {
+      return promptInsertSuggestions
     }
 
     return [
@@ -420,10 +428,11 @@ export default function NodeConfigPanel({
         template: '{{skills}}',
         label: 'Available skills',
         description: 'Current local skills list with names and descriptions.',
+        kind: 'template',
       },
-      ...templateSuggestions,
+      ...promptInsertSuggestions,
     ]
-  }, [localConfig.enableSkills, nodeType, templateSuggestions])
+  }, [localConfig.enableSkills, promptInsertSuggestions, resolvedNodeType])
   const switchConditions = useMemo(
     () => normalizeSwitchConditions(localConfig.conditions),
     [localConfig.conditions],
@@ -444,7 +453,7 @@ export default function NodeConfigPanel({
     () => (pipelines || []).filter((pipeline) => pipeline.id !== pipelineId),
     [pipelineId, pipelines],
   )
-  const isToolNode = nodeType.startsWith('tool:')
+  const isToolNode = resolvedNodeType.startsWith('tool:')
   const connectedToolCount = useMemo(
     () => edges.filter((edge) => edge.source === nodeId && edge.sourceHandle === 'tool').length,
     [edges, nodeId],
@@ -462,7 +471,7 @@ export default function NodeConfigPanel({
     [localConfig.idOverrides],
   )
   const aggregateInputs = useMemo<AggregateInputConfig[]>(() => {
-    if (nodeType !== 'logic:aggregate') {
+    if (resolvedNodeType !== 'logic:aggregate') {
       return []
     }
 
@@ -498,7 +507,7 @@ export default function NodeConfigPanel({
     })
 
     return Array.from(sourceMap.values())
-  }, [edges, nodeId, nodeType, nodes])
+  }, [edges, nodeId, nodes, resolvedNodeType])
   const aggregateUnusedOverrideKeys = useMemo(
     () => Object.keys(aggregateIDOverrides).filter((sourceId) => !aggregateInputs.some((source) => source.nodeId === sourceId)),
     [aggregateIDOverrides, aggregateInputs],
@@ -508,8 +517,8 @@ export default function NodeConfigPanel({
     [httpHeadersJSON],
   )
   const showErrorPolicy = useMemo(
-    () => supportsNodeErrorPolicy(nodeType),
-    [nodeType],
+    () => supportsNodeErrorPolicy(resolvedNodeType),
+    [resolvedNodeType],
   )
 
   const handleSwitchConditionChange = (conditionId: string, key: keyof SwitchConditionConfig, value: string) => {
@@ -1327,7 +1336,18 @@ export default function NodeConfigPanel({
                   </Select>
                 </div>
                 <div>
-                  <Label>Parameters JSON</Label>
+                  <FieldLabel
+                    tooltip={(
+                      <>
+                        <p>This field is templated before it is parsed as JSON.</p>
+                        <p>After rendering, it must decode to a JSON object.</p>
+                        <p>If left empty, the current input object is passed through to the called pipeline.</p>
+                        <p>The called pipeline receives these keys at the top level of its input payload.</p>
+                      </>
+                    )}
+                  >
+                    Parameters JSON
+                  </FieldLabel>
                   <TemplateTextarea
                     value={(localConfig.params as string) || ''}
                     onChange={(e) => handleConfigChange('params', e.target.value)}
@@ -1340,7 +1360,19 @@ export default function NodeConfigPanel({
               </>
             ) : nodeType === 'action:lua' ? (
               <div className="space-y-3">
-                <Label>Lua Script</Label>
+                <FieldLabel
+                  tooltip={(
+                    <>
+                      <p>The script runs directly, not inside a <span className="font-mono text-slate-200">function(input)</span> wrapper.</p>
+                      <p><span className="font-mono text-slate-200">input</span> contains the full current payload, and top-level input keys are also available as globals.</p>
+                      <p>Prefer <span className="font-mono text-slate-200">input.field</span> when reading values so the data source stays explicit.</p>
+                      <p>Lua arrays are 1-based, so the first item is <span className="font-mono text-slate-200">input.items[1]</span>.</p>
+                      <p>Return a table for structured output. Returning a primitive becomes <span className="font-mono text-slate-200">result</span> downstream.</p>
+                    </>
+                  )}
+                >
+                  Lua Script
+                </FieldLabel>
                 <div className="rounded-lg border border-border bg-bg-input px-3 py-3">
                   <p className="text-sm text-text">
                     {((localConfig.script as string) || '').trim()
@@ -1350,6 +1382,9 @@ export default function NodeConfigPanel({
                   <p className="mt-1 text-xs text-text-dimmed">
                     {(((localConfig.script as string) || '').split(/\r?\n/).filter(Boolean).length || 0)} lines saved
                   </p>
+                  <div className="mt-3 rounded-md border border-border/70 bg-bg-overlay/70 px-2.5 py-2 text-xs text-text-dimmed">
+                    Read runtime data from <span className="font-mono text-text">input</span>, prefer <span className="font-mono text-text">input.field</span> over implicit globals, remember Lua arrays are 1-based, and return a table when you want named output fields.
+                  </div>
                 </div>
                 <div className="flex justify-end">
                   <Button variant="secondary" onClick={() => setIsLuaEditorOpen(true)}>
@@ -1859,7 +1894,7 @@ export default function NodeConfigPanel({
                     onChange={(e) => handleConfigChange('prompt', e.target.value)}
                     placeholder="Enter your prompt template..."
                     rows={6}
-                    suggestions={templateSuggestions}
+                    suggestions={promptInsertSuggestions}
                   />
                 </div>
                 <div>

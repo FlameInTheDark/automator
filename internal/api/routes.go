@@ -45,7 +45,7 @@ type Config struct {
 
 func New(cfg Config) *fiber.App {
 	app := fiber.New(fiber.Config{
-		AppName:      "Proxmox Automator",
+		AppName:      "Automator",
 		ServerHeader: "Automator",
 	})
 
@@ -105,7 +105,7 @@ func New(cfg Config) *fiber.App {
 		cfg.ExecutionRunner,
 	)
 	llmChatHandler := handlers.NewLLMChatHandler(llmProviderStore, clusterStore, kubernetesClusterStore, pipelineStore, chatStore, cfg.ExecutionRunner, cfg.Scheduler, cfg.SkillStore, cfg.ShellRunner, assistantProfileStore)
-	editorAssistantHandler := handlers.NewEditorAssistantHandler(llmProviderStore, assistantProfileStore)
+	editorAssistantHandler := handlers.NewEditorAssistantHandler(llmProviderStore, assistantProfileStore, cfg.SkillStore)
 	assistantProfileHandler := handlers.NewAssistantProfileHandler(assistantProfileStore)
 	executionHandler := handlers.NewExecutionHandler(executionStore, cfg.ExecutionRunner)
 

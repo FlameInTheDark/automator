@@ -297,7 +297,7 @@ export const api = {
   },
   assistantProfiles: {
     get: (scope: 'pipeline_editor' | 'chat_window') => request<AssistantProfile>(`/assistant-profiles/${scope}`),
-    update: (scope: 'pipeline_editor' | 'chat_window', data: Pick<AssistantProfile, 'system_instructions' | 'enabled_modules'>) =>
+    update: (scope: 'pipeline_editor' | 'chat_window', data: Pick<AssistantProfile, 'system_instructions'> & Partial<Pick<AssistantProfile, 'enabled_modules'>>) =>
       request<AssistantProfile>(`/assistant-profiles/${scope}`, { method: 'PUT', body: JSON.stringify(data) }),
     restoreDefaults: (scope: 'pipeline_editor' | 'chat_window') =>
       request<AssistantProfile>(`/assistant-profiles/${scope}/restore-defaults`, { method: 'POST' }),

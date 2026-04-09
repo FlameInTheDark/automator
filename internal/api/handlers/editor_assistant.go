@@ -13,20 +13,23 @@ import (
 	"github.com/FlameInTheDark/automator/internal/db/models"
 	"github.com/FlameInTheDark/automator/internal/db/query"
 	"github.com/FlameInTheDark/automator/internal/llm"
+	"github.com/FlameInTheDark/automator/internal/skills"
 )
 
 type EditorAssistantHandler struct {
 	providerStore     *query.LLMProviderStore
 	assistantProfiles *assistants.Store
+	skillStore        skills.Reader
 }
 
 type editorAssistantRequest struct {
-	ProviderID string                          `json:"provider_id,omitempty"`
-	Mode       string                          `json:"mode"`
-	Message    string                          `json:"message"`
-	Messages   []editorAssistantHistoryMessage `json:"messages"`
-	Pipeline   assistants.PipelineSnapshot     `json:"pipeline"`
-	Selection  assistants.SelectionSnapshot    `json:"selection"`
+	ProviderID  string                             `json:"provider_id,omitempty"`
+	Mode        string                             `json:"mode"`
+	Message     string                             `json:"message"`
+	Messages    []editorAssistantHistoryMessage    `json:"messages"`
+	Pipeline    assistants.PipelineSnapshot        `json:"pipeline"`
+	Selection   assistants.SelectionSnapshot       `json:"selection"`
+	AttachedLog *assistants.ExecutionLogAttachment `json:"attached_log,omitempty"`
 }
 
 type editorAssistantHistoryMessage struct {
@@ -45,17 +48,20 @@ type editorAssistantResponsePayload struct {
 }
 
 type editorAssistantToolExecutor struct {
-	snapshot assistants.PipelineSnapshot
-	enabled  bool
+	snapshot    assistants.PipelineSnapshot
+	editEnabled bool
+	skillStore  skills.Reader
 }
 
 func NewEditorAssistantHandler(
 	providerStore *query.LLMProviderStore,
 	assistantProfiles *assistants.Store,
+	skillStore skills.Reader,
 ) *EditorAssistantHandler {
 	return &EditorAssistantHandler{
 		providerStore:     providerStore,
 		assistantProfiles: assistantProfiles,
+		skillStore:        skillStore,
 	}
 }
 
@@ -103,7 +109,7 @@ func (h *EditorAssistantHandler) ChatStream(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("failed to initialize provider: %v", err)})
 	}
 
-	modelMessages, err := h.buildModelMessages(profile, mode, req.Messages, req.Message, snapshot, req.Selection)
+	modelMessages, err := h.buildModelMessages(profile, mode, req.Messages, req.Message, snapshot, req.Selection, req.AttachedLog)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -113,7 +119,7 @@ func (h *EditorAssistantHandler) ChatStream(c *fiber.Ctx) error {
 		streamCtx = userCtx
 	}
 
-	toolExecutor := newEditorAssistantToolExecutor(snapshot, mode == "edit")
+	toolExecutor := newEditorAssistantToolExecutor(snapshot, mode == "edit", h.skillStore)
 
 	c.Set(fiber.HeaderContentType, "text/event-stream")
 	c.Set(fiber.HeaderCacheControl, "no-cache")
@@ -207,6 +213,7 @@ func (h *EditorAssistantHandler) buildModelMessages(
 	message string,
 	pipelineSnapshot assistants.PipelineSnapshot,
 	selection assistants.SelectionSnapshot,
+	attachedLog *assistants.ExecutionLogAttachment,
 ) ([]llm.Message, error) {
 	modelMessages := []llm.Message{
 		{
@@ -215,7 +222,7 @@ func (h *EditorAssistantHandler) buildModelMessages(
 		},
 		{
 			Role:    "system",
-			Content: buildEditorAssistantContextMessage(pipelineSnapshot, selection),
+			Content: buildEditorAssistantContextMessage(pipelineSnapshot, selection, attachedLog),
 		},
 	}
 
@@ -256,9 +263,12 @@ Mode contract:
 - Never write to the database or talk as if save already happened. The user chooses when to save the pipeline.
 `, mode))
 
-	sections := make([]string, 0, 2)
+	sections := make([]string, 0, 4)
 	if base := assistants.BuildPromptAppendix(profile); base != "" {
 		sections = append(sections, base)
+	}
+	if skillGuidance := h.skillGuidance(profile); skillGuidance != "" {
+		sections = append(sections, skillGuidance)
 	}
 	sections = append(sections, modeSection)
 
@@ -266,7 +276,7 @@ Mode contract:
 		sections = append(sections, strings.TrimSpace(`
 In edit mode:
 - Use apply_live_pipeline_edits when a user asks to add, remove, reconnect, or modify graph elements.
-- Send complete replacement node or edge objects for update operations.
+- For update operations, send the node or edge id plus only the fields that should change.
 - Preserve unrelated nodes, edges, and fields.
 `))
 	}
@@ -274,100 +284,168 @@ In edit mode:
 	return strings.Join(sections, "\n\n")
 }
 
+func (h *EditorAssistantHandler) skillGuidance(profile assistants.Profile) string {
+	if h == nil || h.skillStore == nil {
+		return ""
+	}
+
+	summaryByName := make(map[string]skills.Summary)
+	for _, item := range h.skillStore.List() {
+		summaryByName[strings.ToLower(strings.TrimSpace(item.Name))] = item
+	}
+
+	names := assistants.SkillNamesForModules(profile.EnabledModules)
+	if _, ok := summaryByName["pipeline-builder"]; ok {
+		names = append(names, "pipeline-builder")
+	}
+
+	lines := make([]string, 0, len(names)+2)
+	seen := make(map[string]struct{}, len(names))
+	for _, rawName := range names {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		line := "- " + name
+		if summary, ok := summaryByName[key]; ok && strings.TrimSpace(summary.Description) != "" {
+			line += ": " + strings.TrimSpace(summary.Description)
+		}
+		lines = append(lines, line)
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return strings.Join([]string{
+		"Read local skills on demand with get_skill instead of guessing details.",
+		"Relevant local skills:",
+		strings.Join(lines, "\n"),
+		"Use get_skill only for the skill that matches the current question or requested edit.",
+	}, "\n")
+}
+
 func buildEditorAssistantContextMessage(
 	pipelineSnapshot assistants.PipelineSnapshot,
 	selection assistants.SelectionSnapshot,
+	attachedLog *assistants.ExecutionLogAttachment,
 ) string {
 	type contextEnvelope struct {
-		Pipeline  assistants.PipelineSnapshot  `json:"pipeline"`
-		Selection assistants.SelectionSnapshot `json:"selection"`
+		Pipeline    assistants.PipelineSnapshot        `json:"pipeline"`
+		Selection   assistants.SelectionSnapshot       `json:"selection"`
+		AttachedLog *assistants.ExecutionLogAttachment `json:"attached_log,omitempty"`
 	}
 
 	payload, err := json.MarshalIndent(contextEnvelope{
-		Pipeline:  pipelineSnapshot,
-		Selection: selection,
+		Pipeline:    pipelineSnapshot,
+		Selection:   selection,
+		AttachedLog: attachedLog,
 	}, "", "  ")
 	if err != nil {
 		return "Current editor context is available, but failed to serialize it."
 	}
 
-	return strings.TrimSpace(`
-Current node editor context from the browser:
-- This snapshot is the source of truth for the current request.
-- It may contain unsaved edits that are not in persistent storage.
+	lines := []string{
+		"Current node editor context from the browser:",
+		"- This snapshot is the source of truth for the current request.",
+		"- It may contain unsaved edits that are not in persistent storage.",
+	}
+	if attachedLog != nil {
+		lines = append(lines,
+			"- attached_log is one real execution sample the user selected to share with you.",
+			"- Use it as runtime reference data for what actually flowed through the pipeline in one run.",
+		)
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n") + `
 
 ` + string(payload))
 }
 
-func newEditorAssistantToolExecutor(snapshot assistants.PipelineSnapshot, enabled bool) *editorAssistantToolExecutor {
+func newEditorAssistantToolExecutor(snapshot assistants.PipelineSnapshot, editEnabled bool, skillStore skills.Reader) *editorAssistantToolExecutor {
 	return &editorAssistantToolExecutor{
-		snapshot: snapshot,
-		enabled:  enabled,
+		snapshot:    snapshot,
+		editEnabled: editEnabled,
+		skillStore:  skillStore,
 	}
 }
 
 func (e *editorAssistantToolExecutor) GetAllTools() []llm.ToolDefinition {
-	if !e.enabled {
-		return nil
+	tools := make([]llm.ToolDefinition, 0, 2)
+	if e.skillStore != nil {
+		tools = append(tools, llm.SkillToolDefinition())
+	}
+	if !e.editEnabled {
+		return tools
 	}
 
-	return []llm.ToolDefinition{
-		{
-			Type: "function",
-			Function: llm.ToolSpec{
-				Name:        "apply_live_pipeline_edits",
-				Description: "Validate and normalize live pipeline edit operations against the current browser pipeline snapshot. This updates only the in-memory editor state and never saves to the database.",
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"operations": map[string]interface{}{
-							"type":        "array",
-							"description": "Ordered live edit operations to apply to the current pipeline snapshot.",
-							"items": map[string]interface{}{
-								"type": "object",
-								"properties": map[string]interface{}{
-									"type": map[string]interface{}{
-										"type":        "string",
-										"description": "One of add_nodes, update_nodes, delete_nodes, add_edges, update_edges, delete_edges, set_viewport.",
-									},
-									"nodes": map[string]interface{}{
-										"type":        "array",
-										"description": "Full node objects for add_nodes or update_nodes.",
-										"items":       map[string]interface{}{"type": "object"},
-									},
-									"edges": map[string]interface{}{
-										"type":        "array",
-										"description": "Full edge objects for add_edges or update_edges.",
-										"items":       map[string]interface{}{"type": "object"},
-									},
-									"node_ids": map[string]interface{}{
-										"type":        "array",
-										"description": "Node ids to remove for delete_nodes.",
-										"items":       map[string]interface{}{"type": "string"},
-									},
-									"edge_ids": map[string]interface{}{
-										"type":        "array",
-										"description": "Edge ids to remove for delete_edges.",
-										"items":       map[string]interface{}{"type": "string"},
-									},
-									"viewport": map[string]interface{}{
-										"type":        "object",
-										"description": "Viewport object with x, y, and zoom for set_viewport.",
-									},
+	tools = append(tools, llm.ToolDefinition{
+		Type: "function",
+		Function: llm.ToolSpec{
+			Name:        "apply_live_pipeline_edits",
+			Description: "Validate and normalize live pipeline edit operations against the current browser pipeline snapshot. This updates only the in-memory editor state and never saves to the database.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"operations": map[string]interface{}{
+						"type":        "array",
+						"description": "Ordered live edit operations to apply to the current pipeline snapshot.",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"type": map[string]interface{}{
+									"type":        "string",
+									"description": "One of add_nodes, update_nodes, delete_nodes, add_edges, update_edges, delete_edges, set_viewport.",
 								},
-								"required": []string{"type"},
+								"nodes": map[string]interface{}{
+									"type":        "array",
+									"description": "For add_nodes, provide full React Flow node objects with id, position, and data. For update_nodes, provide node id plus only the fields that should change; existing fields are preserved.",
+									"items":       map[string]interface{}{"type": "object"},
+								},
+								"edges": map[string]interface{}{
+									"type":        "array",
+									"description": "For add_edges, provide full edge objects with id, source, and target. For update_edges, provide edge id plus only the fields that should change; existing fields are preserved.",
+									"items":       map[string]interface{}{"type": "object"},
+								},
+								"node_ids": map[string]interface{}{
+									"type":        "array",
+									"description": "Node ids to remove for delete_nodes.",
+									"items":       map[string]interface{}{"type": "string"},
+								},
+								"edge_ids": map[string]interface{}{
+									"type":        "array",
+									"description": "Edge ids to remove for delete_edges.",
+									"items":       map[string]interface{}{"type": "string"},
+								},
+								"viewport": map[string]interface{}{
+									"type":        "object",
+									"description": "Viewport object with x, y, and zoom for set_viewport.",
+								},
 							},
+							"required": []string{"type"},
 						},
 					},
-					"required": []string{"operations"},
 				},
+				"required": []string{"operations"},
 			},
 		},
-	}
+	})
+
+	return tools
 }
 
 func (e *editorAssistantToolExecutor) Execute(ctx context.Context, name string, arguments json.RawMessage) (any, error) {
-	if !e.enabled || name != "apply_live_pipeline_edits" {
+	if name == "get_skill" && e.skillStore != nil {
+		return llm.ExecuteSkillTool(ctx, e.skillStore, arguments)
+	}
+
+	if !e.editEnabled || name != "apply_live_pipeline_edits" {
 		return nil, fmt.Errorf("tool %q is not available", name)
 	}
 

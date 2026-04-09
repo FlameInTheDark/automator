@@ -108,9 +108,14 @@ export function TemplateInsertButton({ suggestions, onInsert }: TemplateInsertBu
         suggestion.label,
         suggestion.expression,
         suggestion.description ?? '',
+        suggestion.preview ?? '',
       ].join(' ').toLowerCase().includes(normalizedQuery)
     )
   }, [query, suggestions])
+
+  const hasSampleSuggestions = suggestions.some((suggestion) => suggestion.kind === 'sample')
+  const templateSuggestions = filteredSuggestions.filter((suggestion) => suggestion.kind !== 'sample')
+  const sampleSuggestions = filteredSuggestions.filter((suggestion) => suggestion.kind === 'sample')
 
   if (suggestions.length === 0) {
     return null
@@ -129,7 +134,7 @@ export function TemplateInsertButton({ suggestions, onInsert }: TemplateInsertBu
             ref={searchInputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search templates..."
+            placeholder={hasSampleSuggestions ? 'Search templates and samples...' : 'Search templates...'}
             className="py-2 pl-9 pr-3 text-xs"
           />
         </div>
@@ -137,27 +142,74 @@ export function TemplateInsertButton({ suggestions, onInsert }: TemplateInsertBu
       <div className="max-h-72 overflow-y-auto p-1.5">
         {filteredSuggestions.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-text-dimmed">
-            No template fields match your search.
+            {hasSampleSuggestions ? 'No templates or samples match your search.' : 'No template fields match your search.'}
           </div>
         ) : (
-          filteredSuggestions.map((suggestion) => (
-            <button
-              key={suggestion.expression}
-              type="button"
-              onClick={() => {
-                onInsert(suggestion.template)
-                setIsOpen(false)
-                setQuery('')
-              }}
-              className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-bg-overlay"
-            >
-              <div className="text-xs font-medium text-text">{suggestion.label}</div>
-              <div className="mt-1 font-mono text-[11px] text-accent">{suggestion.template}</div>
-              {suggestion.description && (
-                <div className="mt-1 text-[11px] text-text-dimmed">{suggestion.description}</div>
-              )}
-            </button>
-          ))
+          <>
+            {templateSuggestions.length > 0 && (
+              <div className="space-y-1">
+                {hasSampleSuggestions && (
+                  <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-dimmed">
+                    Templates
+                  </div>
+                )}
+                {templateSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.expression}
+                    type="button"
+                    onClick={() => {
+                      onInsert(suggestion.template)
+                      setIsOpen(false)
+                      setQuery('')
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-bg-overlay"
+                  >
+                    <div className="text-xs font-medium text-text">{suggestion.label}</div>
+                    <div className="mt-1 font-mono text-[11px] text-accent">{suggestion.template}</div>
+                    {suggestion.description && (
+                      <div className="mt-1 text-[11px] text-text-dimmed">{suggestion.description}</div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {sampleSuggestions.length > 0 && (
+              <div className="space-y-1">
+                <div className={cn(
+                  'px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-dimmed',
+                  templateSuggestions.length > 0 ? 'pb-1 pt-3' : 'pb-1 pt-1',
+                )}>
+                  Sample Data
+                </div>
+                {sampleSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.expression}
+                    type="button"
+                    onClick={() => {
+                      onInsert(suggestion.template)
+                      setIsOpen(false)
+                      setQuery('')
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-bg-overlay"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-medium text-text">{suggestion.label}</div>
+                      <span className="rounded-full border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-accent">
+                        Latest
+                      </span>
+                    </div>
+                    <div className="mt-1 overflow-hidden rounded-md border border-border/70 bg-slate-950/50 px-2 py-1.5 font-mono text-[11px] text-slate-200 whitespace-pre-wrap break-all">
+                      {suggestion.preview ?? suggestion.template}
+                    </div>
+                    {suggestion.description && (
+                      <div className="mt-1 text-[11px] text-text-dimmed">{suggestion.description}</div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>,
@@ -173,7 +225,7 @@ export function TemplateInsertButton({ suggestions, onInsert }: TemplateInsertBu
         className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-overlay px-2 py-1 text-[11px] font-medium text-text-muted transition-colors hover:text-accent hover:border-accent/50"
       >
         <Braces className="w-3 h-3" />
-        Templates
+        {hasSampleSuggestions ? 'Insert' : 'Templates'}
       </button>
 
       {menu}
