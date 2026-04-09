@@ -1,9 +1,9 @@
 ---
 name: pipeline-builder
-description: Design, create, and safely edit Automator pipelines. Use this skill when an LLM needs to produce valid nodes/edges JSON for pipeline tools or reason about existing workflows.
+description: Design, create, and safely edit Emerald pipelines. Use this skill when an LLM needs to produce valid nodes/edges JSON for pipeline tools or reason about existing workflows.
 ---
 
-Use this skill whenever the task is to create, inspect, update, or delete Automator pipelines.
+Use this skill whenever the task is to create, inspect, update, or delete Emerald pipelines.
 
 This app stores pipelines as React Flow-style JSON. Good pipelines here are small, explicit, and easy to debug. Prefer a working first version over an overcomplicated graph.
 
@@ -279,7 +279,7 @@ Kubernetes apply manifest:
     "clusterId": "k8s-cluster-id",
     "namespace": "production",
     "manifest": "apiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: api\\nspec:\\n  replicas: 3",
-    "fieldManager": "automator",
+    "fieldManager": "emerald",
     "force": false
   },
   "enabled": true

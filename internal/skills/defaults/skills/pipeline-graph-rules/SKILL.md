@@ -1,6 +1,6 @@
 ---
 name: pipeline-graph-rules
-description: Reference for valid Automator node and edge topology, branching handles, and live-edit safety rules. Use when reasoning about graph structure, adding or removing nodes, reconnecting edges, or validating pipeline edits.
+description: Reference for valid Emerald node and edge topology, branching handles, and live-edit safety rules. Use when reasoning about graph structure, adding or removing nodes, reconnecting edges, or validating pipeline edits.
 ---
 
 Use this skill when the task is about whether a pipeline graph is structurally valid.

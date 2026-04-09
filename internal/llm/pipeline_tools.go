@@ -129,7 +129,7 @@ func (r *ToolRegistry) registerPipelineTools() {
 		Type: "function",
 		Function: ToolSpec{
 			Name:        "create_pipeline",
-			Description: "Create a new pipeline. Provide a name and, when needed, nodes, edges, and an optional viewport using the Automator flow JSON schema.",
+			Description: "Create a new pipeline. Provide a name and, when needed, nodes, edges, and an optional viewport using the Emerald flow JSON schema.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

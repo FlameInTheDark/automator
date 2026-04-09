@@ -3,9 +3,13 @@
 automator
 automator.exe
 automator.exe~
+emerald
+emerald.exe
+emerald.exe~
 server.exe
-automator.db
+emerald.db
 automator-smoketest.db
+emerald-smoketest.db
 smoke.out
 smoke.err
 web/node_modules

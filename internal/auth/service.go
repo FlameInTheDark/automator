@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	DefaultCookieName = "automator_session"
+	DefaultCookieName = "emerald_session"
 	DefaultSessionTTL = 24 * time.Hour
 )
 

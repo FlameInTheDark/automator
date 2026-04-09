@@ -1,6 +1,6 @@
 ---
 name: logic-expression-guide
-description: Guide for expr-based condition and switch logic in Automator pipelines. Use when writing or debugging `logic:condition` and `logic:switch` expressions or explaining what variables are available there.
+description: Guide for expr-based condition and switch logic in Emerald pipelines. Use when writing or debugging `logic:condition` and `logic:switch` expressions or explaining what variables are available there.
 ---
 
 Use this skill when the task is about expressions in logic nodes.

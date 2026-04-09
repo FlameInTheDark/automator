@@ -211,6 +211,7 @@ export const api = {
   llmProviders: {
     list: () => request<LLMProvider[]>('/llm-providers'),
     create: (data: unknown) => request<LLMProvider>('/llm-providers', { method: 'POST', body: JSON.stringify(data) }),
+    discoverModels: (data: unknown) => request<LLMModelInfo[]>('/llm-providers/discover-models', { method: 'POST', body: JSON.stringify(data) }),
     get: (id: string) => request<LLMProvider>(`/llm-providers/${id}`),
     update: (id: string, data: unknown) => request<LLMProvider>(`/llm-providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) => request<void>(`/llm-providers/${id}`, { method: 'DELETE' }),

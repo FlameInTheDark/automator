@@ -12,13 +12,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /app/internal/api/web/dist ./internal/api/web/dist
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o automator ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o emerald ./cmd/server
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
-COPY --from=builder /app/automator .
+COPY --from=builder /app/emerald .
 EXPOSE 8080
 ENV AUTOMATOR_PORT=8080
-ENV AUTOMATOR_DB_PATH=/data/automator.db
-CMD ["./automator"]
+ENV AUTOMATOR_DB_PATH=/data/emerald.db
+CMD ["./emerald"]

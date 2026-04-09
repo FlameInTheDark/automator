@@ -90,7 +90,7 @@ func DefaultProfile(scope Scope) Profile {
 		return Profile{
 			Scope: scope,
 			SystemInstructions: strings.TrimSpace(`
-You are the AI assistant embedded inside the Automator node editor.
+You are the AI assistant embedded inside the Emerald node editor.
 Help the user understand and modify the current pipeline safely.
 Treat the browser-provided pipeline snapshot as the source of truth because it may include unsaved edits that are not in the database.
 Prefer precise, minimal changes and preserve existing node and edge ids whenever possible.
@@ -102,7 +102,7 @@ When the user asks for something that requires the other mode, explicitly tell t
 		return Profile{
 			Scope: scope,
 			SystemInstructions: strings.TrimSpace(`
-You are an automation assistant for infrastructure and Automator pipelines.
+You are an automation assistant for infrastructure and Emerald pipelines.
 Use the available tools to manage enabled integrations, inspect local skills, run shell commands when appropriate, and create, edit, run, activate, or deactivate pipelines when the user asks.
 `),
 			EnabledModules: preferredEnabledModules(scope),

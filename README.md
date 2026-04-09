@@ -1,6 +1,6 @@
-# Automator
+# Emerald
 
-Automator is a single-binary automation platform for building visual pipelines around infrastructure, messaging, local tooling, and AI workflows. It combines a Go backend, an embedded React UI, SQLite storage, and a node-based execution engine so you can build, run, observe, and iteratively refine automations from one place.
+Emerald is a single-binary automation platform for building visual pipelines around infrastructure, messaging, local tooling, and AI workflows. It combines a Go backend, an embedded React UI, SQLite storage, and a node-based execution engine so you can build, run, observe, and iteratively refine automations from one place.
 
 ## Highlights
 
@@ -127,37 +127,37 @@ Run with Docker Compose:
 docker compose up --build -d
 ```
 
-The compose file stores SQLite data in the `automator-data` named volume and exposes the app on port `8080`.
-It also stores the container-local `.agents` directory in the `automator-agents` named volume so bundled/default skills and any custom workspace skills persist across restarts.
+The compose file stores SQLite data in the `emerald-data` named volume and exposes the app on port `8080`.
+It also stores the container-local `.agents` directory in the `emerald-agents` named volume so bundled/default skills and any custom workspace skills persist across restarts.
 
 Published images are expected at:
 
 ```text
-ghcr.io/flameinthedark/automator:<tag>
-ghcr.io/flameinthedark/automator:latest
+ghcr.io/flameinthedark/emerald:<tag>
+ghcr.io/flameinthedark/emerald:latest
 ```
 
 ## Configuration
 
-Automator reads configuration from environment variables.
+Emerald reads configuration from environment variables. The variable names currently retain the `AUTOMATOR_*` prefix for compatibility.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AUTOMATOR_PORT` | `8080` | HTTP server port |
-| `AUTOMATOR_DB_PATH` | `./automator.db` | SQLite database path |
+| `AUTOMATOR_DB_PATH` | `./emerald.db` | SQLite database path |
 | `AUTOMATOR_AUTH_USERNAME` | `admin` | Username ensured at startup when it does not already exist |
 | `AUTOMATOR_AUTH_PASSWORD` | `admin` | Password used when creating the configured bootstrap user |
 | `AUTOMATOR_AUTH_SESSION_TTL_HOURS` | `24` | Session lifetime in hours |
-| `AUTOMATOR_AUTH_COOKIE_NAME` | `automator_session` | Authentication cookie name |
+| `AUTOMATOR_AUTH_COOKIE_NAME` | `emerald_session` | Authentication cookie name |
 | `AUTOMATOR_ENCRYPTION_KEY` | empty | Optional 32-character key used to encrypt stored secrets |
 | `AUTOMATOR_SKILLS_DIR` | empty | Optional override for the local skills directory used by chat and agent experiences |
 
 Notes:
 
-- If `AUTOMATOR_ENCRYPTION_KEY` is not provided, Automator generates one on first boot and stores it in the database.
+- If `AUTOMATOR_ENCRYPTION_KEY` is not provided, Emerald generates one on first boot and stores it in the database.
 - Stored secrets include items such as cluster credentials, channel tokens, and LLM provider keys.
 - `AUTOMATOR_HOST` exists in config today but is not currently used by the server listener.
-- If `AUTOMATOR_SKILLS_DIR` is not set, Automator searches upward from the current working directory and server executable location for the nearest `.agents/skills`, then falls back to `./.agents/skills`.
+- If `AUTOMATOR_SKILLS_DIR` is not set, Emerald searches upward from the current working directory and server executable location for the nearest `.agents/skills`, then falls back to `./.agents/skills`.
 
 ## Development
 
@@ -196,13 +196,13 @@ make docker-run # start docker-compose stack
 
 ## Local Skills
 
-Automator can load repository-local skills for chat and agent workflows.
+Emerald can load repository-local skills for chat and agent workflows.
 
 - Put skills under `.agents/skills/<skill-name>/SKILL.md`
 - Skills are refreshed automatically while the server is running
 - The chat workspace can see available skills and request the full body of a skill through the built-in `get_skill` tool
 - LLM agent nodes can use the same local skill store
-- Set `AUTOMATOR_SKILLS_DIR` if you want Automator to use a different skills directory
+- Set `AUTOMATOR_SKILLS_DIR` if you want Emerald to use a different skills directory
 
 ## Project Layout
 

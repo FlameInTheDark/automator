@@ -1370,6 +1370,7 @@ function PipelineEditor() {
   const handleFitCanvas = useCallback(() => {
     void fitCanvasView({ padding: 0.2, duration: 220 })
   }, [fitCanvasView])
+  const canvasControlButtonClass = 'h-8 min-w-8 rounded-xl px-1.5 text-text-muted hover:text-text'
 
   const updateNodeConfig = useCallback((config: Record<string, unknown>) => {
     if (!selectedNodeId) return
@@ -2169,57 +2170,98 @@ function PipelineEditor() {
               </FloatingEditorPanel>
             </Panel>
 
-            <Panel position="bottom-left" className="!m-4">
-              <div className="flex w-fit items-center gap-0.5 rounded-xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleZoomIn}
-                  disabled={isCanvasInteractionBlocked}
-                  className="h-7 min-w-7 rounded-lg px-1.5 text-text-muted hover:text-text"
-                  title="Zoom in"
-                  aria-label="Zoom in"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleZoomOut}
-                  disabled={isCanvasInteractionBlocked}
-                  className="h-7 min-w-7 rounded-lg px-1.5 text-text-muted hover:text-text"
-                  title="Zoom out"
-                  aria-label="Zoom out"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleFitCanvas}
-                  disabled={isCanvasInteractionBlocked}
-                  className="h-7 min-w-7 rounded-lg px-1.5 text-text-muted hover:text-text"
-                  title="Fit view"
-                  aria-label="Fit view"
-                >
-                  <ScanSearch className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsFlowInteractive((current) => !current)}
-                  disabled={isCanvasInteractionBlocked}
-                  className={isFlowInteractive
-                    ? 'h-7 min-w-7 rounded-lg border border-accent/30 bg-accent/10 px-1.5 text-accent hover:bg-accent/15 hover:text-accent-hover'
-                    : 'h-7 min-w-7 rounded-lg border border-amber-500/30 bg-amber-500/10 px-1.5 text-amber-300 hover:bg-amber-500/15 hover:text-amber-200'}
-                  title={isFlowInteractive ? 'Lock interactivity' : 'Unlock interactivity'}
-                  aria-label={isFlowInteractive ? 'Lock interactivity' : 'Unlock interactivity'}
-                >
-                  {isFlowInteractive ? <LockOpen className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-                </Button>
-              </div>
-            </Panel>
+            {selectedNodeId && (
+              <Panel position="bottom-right" className="!m-4">
+                <div className="bg-bg-elevated border border-border rounded-lg shadow-lg p-2 flex gap-1">
+                  {selectedNode?.data?.type !== VISUAL_GROUP_TYPE && (
+                    <Button variant="ghost" size="sm" onClick={duplicateNode} title="Duplicate">
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={deleteNode} title="Delete">
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </Button>
+                </div>
+              </Panel>
+            )}
 
+            <EditorAssistantDock
+              triggerControlsLeft={(
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleZoomIn}
+                    disabled={isCanvasInteractionBlocked}
+                    className={canvasControlButtonClass}
+                    title="Zoom in"
+                    aria-label="Zoom in"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleZoomOut}
+                    disabled={isCanvasInteractionBlocked}
+                    className={canvasControlButtonClass}
+                    title="Zoom out"
+                    aria-label="Zoom out"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </Button>
+                </>
+              )}
+              triggerControlsRight={(
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleFitCanvas}
+                    disabled={isCanvasInteractionBlocked}
+                    className={canvasControlButtonClass}
+                    title="Fit view"
+                    aria-label="Fit view"
+                  >
+                    <ScanSearch className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsFlowInteractive((current) => !current)}
+                    disabled={isCanvasInteractionBlocked}
+                    className={cn(
+                      'h-8 min-w-8 rounded-xl px-1.5',
+                      isFlowInteractive
+                        ? 'border border-accent/30 bg-accent/10 text-accent hover:bg-accent/15 hover:text-accent-hover'
+                        : 'border border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15 hover:text-amber-200',
+                    )}
+                    title={isFlowInteractive ? 'Lock interactivity' : 'Unlock interactivity'}
+                    aria-label={isFlowInteractive ? 'Lock interactivity' : 'Unlock interactivity'}
+                  >
+                    {isFlowInteractive ? <LockOpen className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                  </Button>
+                </>
+              )}
+              pipelineKey={id ?? 'new'}
+              pipeline={{
+                name: pipelineName,
+                description: pipelineDescription,
+                status: pipelineStatus,
+                nodes,
+                edges,
+                viewport: getViewport(),
+              }}
+              selection={{
+                selected_node_id: selectedNodeId ?? undefined,
+                selected_node_ids: selectedNodeIds,
+              }}
+              providers={llmProviders}
+              injectedLogAttachment={assistantLogAttachment}
+              onApplyOperations={handleApplyAssistantOperations}
+              onEditLockChange={setAssistantEditLockActive}
+            />
+            
             {selectedNode && !showExecutionLog && (
               <Panel position="top-right" className="!m-4 !mt-28 flex max-w-[calc(100vw-2rem)] sm:!mt-20">
                 <NodeConfigPanel
@@ -2251,40 +2293,6 @@ function PipelineEditor() {
               </Panel>
             )}
             
-            {selectedNodeId && (
-              <Panel position="bottom-right" className="!m-4">
-                <div className="bg-bg-elevated border border-border rounded-lg shadow-lg p-2 flex gap-1">
-                  {selectedNode?.data?.type !== VISUAL_GROUP_TYPE && (
-                    <Button variant="ghost" size="sm" onClick={duplicateNode} title="Duplicate">
-                      <Copy className="w-4 h-4" />
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={deleteNode} title="Delete">
-                    <Trash2 className="w-4 h-4 text-red-400" />
-                  </Button>
-                </div>
-              </Panel>
-            )}
-
-            <EditorAssistantDock
-              pipelineKey={id ?? 'new'}
-              pipeline={{
-                name: pipelineName,
-                description: pipelineDescription,
-                status: pipelineStatus,
-                nodes,
-                edges,
-                viewport: getViewport(),
-              }}
-              selection={{
-                selected_node_id: selectedNodeId ?? undefined,
-                selected_node_ids: selectedNodeIds,
-              }}
-              providers={llmProviders}
-              injectedLogAttachment={assistantLogAttachment}
-              onApplyOperations={handleApplyAssistantOperations}
-              onEditLockChange={setAssistantEditLockActive}
-            />
           </ReactFlow>
 
           {assistantEditLockActive && (

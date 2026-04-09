@@ -59,7 +59,7 @@ func (e *PipelineCreateToolNode) ToolDefinition(_ context.Context, meta node.Too
 
 	description := strings.TrimSpace(cfg.ToolDescription)
 	if description == "" {
-		description = "Create a new pipeline. Provide a name and, when needed, nodes, edges, and an optional viewport using the Automator flow JSON schema."
+		description = "Create a new pipeline. Provide a name and, when needed, nodes, edges, and an optional viewport using the Emerald flow JSON schema."
 	}
 
 	return &llm.ToolDefinition{

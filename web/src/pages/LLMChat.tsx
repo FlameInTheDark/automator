@@ -741,7 +741,7 @@ export default function LLMChat() {
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleComposerKeyDown}
-                placeholder={conversationId ? 'Reply in this conversation…' : 'Message Automator about infrastructure, pipelines, or local tooling…'}
+                placeholder={conversationId ? 'Reply in this conversation…' : 'Message Emerald about infrastructure, pipelines, or local tooling…'}
                 className="min-h-[92px] max-h-56 w-full resize-none border-0 bg-transparent px-4 pb-2 pt-4 text-sm text-text placeholder:text-text-dimmed focus:outline-none"
                 disabled={isSending || providers.length === 0}
                 rows={1}

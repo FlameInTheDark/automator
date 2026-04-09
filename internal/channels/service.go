@@ -465,7 +465,7 @@ func (s *Service) sendWelcome(ctx context.Context, channel *models.Channel, cont
 
 	text := strings.TrimSpace(channel.WelcomeMessage)
 	if text == "" {
-		text = "Welcome! Use this one-time code to connect this chat to Automator."
+		text = "Welcome! Use this one-time code to connect this chat to Emerald."
 	}
 	text = fmt.Sprintf("%s\n\nCode: %s", text, code)
 

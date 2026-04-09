@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/FlameInTheDark/automator/internal/db/models"
@@ -116,7 +118,35 @@ func (h *LLMProviderHandler) ListModels(c *fiber.Ctx) error {
 		})
 	}
 
-	models, err := llm.ListModels(ctx, config)
+	return listModelsFromConfig(c, config)
+}
+
+func (h *LLMProviderHandler) DiscoverModels(c *fiber.Ctx) error {
+	var req models.LLMProvider
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	config, err := llm.ConfigFromModel(&req)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid provider configuration: " + err.Error(),
+		})
+	}
+
+	return listModelsFromConfig(c, config)
+}
+
+func listModelsFromConfig(c *fiber.Ctx, config llm.Config) error {
+	if !llm.SupportsModelDiscovery(config.ProviderType) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("model discovery is not supported for provider type %s", config.ProviderType),
+		})
+	}
+
+	models, err := llm.ListModels(c.Context(), config)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 			"error": err.Error(),

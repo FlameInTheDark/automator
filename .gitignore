@@ -1,8 +1,5 @@
 # Binaries
-/automator
-/automator.exe
-/server
-/server.exe
+*.exe
 *.test
 *.out
 

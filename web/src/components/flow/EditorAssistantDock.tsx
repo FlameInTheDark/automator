@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Panel } from '@xyflow/react'
 import { Brain, Check, ChevronDown, ChevronRight, Loader2, Send, Square, Terminal, Trash2, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -50,6 +50,10 @@ type EditorAssistantDockProps = {
   injectedLogAttachment?: EditorAssistantExecutionLogAttachment | null
   onApplyOperations: (operations: LivePipelineOperation[]) => Promise<void> | void
   onEditLockChange: (locked: boolean) => void
+  panelPosition?: 'bottom-center' | 'bottom-left'
+  panelClassName?: string
+  triggerControlsLeft?: ReactNode
+  triggerControlsRight?: ReactNode
 }
 
 export default function EditorAssistantDock({
@@ -60,6 +64,10 @@ export default function EditorAssistantDock({
   injectedLogAttachment,
   onApplyOperations,
   onEditLockChange,
+  panelPosition = 'bottom-center',
+  panelClassName,
+  triggerControlsLeft,
+  triggerControlsRight,
 }: EditorAssistantDockProps) {
   const { addToast } = useUIStore()
 
@@ -89,6 +97,7 @@ export default function EditorAssistantDock({
     Boolean(attachedLog)
   )
   const providerLabel = providers.find((provider) => provider.id === providerId)?.name ?? 'Choose model'
+  const hasTriggerControls = Boolean(triggerControlsLeft) || Boolean(triggerControlsRight)
 
   useEffect(() => {
     if (providerId || providers.length === 0) {
@@ -297,8 +306,18 @@ export default function EditorAssistantDock({
   }
 
   return (
-    <Panel position="bottom-center" className="!mb-4 pointer-events-none z-30">
-      <div className="flex w-[min(32rem,calc(100vw-1rem))] max-w-full flex-col items-center gap-3 sm:w-[30rem]">
+    <Panel
+      position={panelPosition}
+      className={cn(
+        'pointer-events-none z-30',
+        panelPosition === 'bottom-left' ? '!m-4' : '!mb-4',
+        panelClassName,
+      )}
+    >
+      <div className={cn(
+        'flex w-[min(32rem,calc(100vw-1rem))] max-w-full flex-col gap-3 sm:w-[30rem]',
+        panelPosition === 'bottom-left' ? 'items-start' : 'items-center',
+      )}>
         {open && (
           <div className="pointer-events-auto w-full origin-bottom overflow-hidden rounded-[28px] border border-border/80 bg-bg-elevated/95 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl animate-dock-in">
             <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-4">
@@ -491,20 +510,38 @@ export default function EditorAssistantDock({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          disabled={isSending}
-          className={cn(
-            'pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full border shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-[transform,background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-70',
-            open
-              ? '-translate-y-0.5 scale-[1.03] border-accent/40 bg-accent text-white'
-              : 'border-border bg-bg-elevated/95 text-accent backdrop-blur hover:border-accent/30 hover:bg-bg-overlay',
+        <div className={cn(
+          'pointer-events-auto flex max-w-full items-center gap-2',
+          panelPosition === 'bottom-left' ? 'self-start' : 'self-center',
+        )}>
+          {triggerControlsLeft && (
+            <div className="flex items-center gap-1 rounded-2xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur">
+              {triggerControlsLeft}
+            </div>
           )}
-          aria-label={open ? 'Close AI assistant' : 'Open AI assistant'}
-        >
-          <Brain className="h-6 w-6" />
-        </button>
+
+          <button
+            type="button"
+            onClick={() => setOpen((current) => !current)}
+            disabled={isSending}
+            className={cn(
+              'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-[transform,background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-70',
+              open
+                ? '-translate-y-0.5 scale-[1.03] border-accent/40 bg-accent text-white'
+                : 'border-border bg-bg-elevated/95 text-accent backdrop-blur hover:border-accent/30 hover:bg-bg-overlay',
+              hasTriggerControls && 'shadow-[0_18px_40px_rgba(0,0,0,0.32)]',
+            )}
+            aria-label={open ? 'Close AI assistant' : 'Open AI assistant'}
+          >
+            <Brain className="h-6 w-6" />
+          </button>
+
+          {triggerControlsRight && (
+            <div className="flex items-center gap-1 rounded-2xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur">
+              {triggerControlsRight}
+            </div>
+          )}
+        </div>
       </div>
     </Panel>
   )

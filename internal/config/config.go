@@ -37,13 +37,13 @@ func Load() (*Config, error) {
 			Host: getEnv("AUTOMATOR_HOST", "0.0.0.0"),
 		},
 		Database: DatabaseConfig{
-			Path: getEnv("AUTOMATOR_DB_PATH", "./automator.db"),
+			Path: getEnv("AUTOMATOR_DB_PATH", "./emerald.db"),
 		},
 		Auth: AuthConfig{
 			Username:   getEnv("AUTOMATOR_AUTH_USERNAME", "admin"),
 			Password:   getEnv("AUTOMATOR_AUTH_PASSWORD", "admin"),
 			SessionTTL: time.Duration(getEnvInt("AUTOMATOR_AUTH_SESSION_TTL_HOURS", 24)) * time.Hour,
-			CookieName: getEnv("AUTOMATOR_AUTH_COOKIE_NAME", "automator_session"),
+			CookieName: getEnv("AUTOMATOR_AUTH_COOKIE_NAME", "emerald_session"),
 		},
 		EncryptionKey: getEnv("AUTOMATOR_ENCRYPTION_KEY", ""),
 	}

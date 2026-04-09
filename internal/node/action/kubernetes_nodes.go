@@ -494,7 +494,7 @@ func (r kubernetesOperationRunner) toolSchema(meta node.ToolNodeMetadata, raw js
 			kubernetesToolParameters(map[string]any{
 				"namespace":    toolStringProperty("Optional namespace override for namespaced resources."),
 				"manifest":     toolStringProperty("YAML or JSON manifest to apply."),
-				"fieldManager": toolStringProperty("Optional field manager name. Defaults to automator."),
+				"fieldManager": toolStringProperty("Optional field manager name. Defaults to emerald."),
 				"force":        toolBooleanProperty("Force ownership conflicts during apply."),
 			}, requiredFields(cfg, raw, "manifest")...)
 	case KubernetesOperationPatchResource:

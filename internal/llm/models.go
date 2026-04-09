@@ -49,8 +49,19 @@ func ListModels(ctx context.Context, cfg Config) ([]ModelInfo, error) {
 		return listOpenAICompatibleModels(ctx, cfg, true)
 	case ProviderOllama:
 		return listOllamaModels(ctx, cfg)
+	case ProviderCustom:
+		return listOpenAICompatibleModels(ctx, cfg, false)
 	default:
 		return nil, fmt.Errorf("model discovery is not supported for provider type %s", cfg.ProviderType)
+	}
+}
+
+func SupportsModelDiscovery(providerType ProviderType) bool {
+	switch providerType {
+	case ProviderOpenAI, ProviderOpenRouter, ProviderOllama, ProviderCustom:
+		return true
+	default:
+		return false
 	}
 }
 

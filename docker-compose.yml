@@ -1,17 +1,19 @@
+name: emerald
+
 services:
-  automator:
+  emerald:
     build: .
     ports:
       - "8080:8080"
     volumes:
-      - automator-data:/data
-      - automator-agents:/root/.agents
+      - emerald-data:/data
+      - emerald-agents:/root/.agents
     environment:
       - AUTOMATOR_PORT=8080
-      - AUTOMATOR_DB_PATH=/data/automator.db
+      - AUTOMATOR_DB_PATH=/data/emerald.db
       - AUTOMATOR_SKILLS_DIR=/root/.agents/skills
     restart: unless-stopped
 
 volumes:
-  automator-data:
-  automator-agents:
+  emerald-data:
+  emerald-agents:

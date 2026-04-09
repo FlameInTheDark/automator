@@ -45,8 +45,8 @@ type Config struct {
 
 func New(cfg Config) *fiber.App {
 	app := fiber.New(fiber.Config{
-		AppName:      "Automator",
-		ServerHeader: "Automator",
+		AppName:      "Emerald",
+		ServerHeader: "Emerald",
 	})
 
 	app.Use(recover.New())
@@ -170,6 +170,7 @@ func New(cfg Config) *fiber.App {
 	llmProviders := api.Group("/llm-providers")
 	llmProviders.Get("/", llmProviderHandler.List)
 	llmProviders.Post("/", llmProviderHandler.Create)
+	llmProviders.Post("/discover-models", llmProviderHandler.DiscoverModels)
 	llmProviders.Get("/:id", llmProviderHandler.Get)
 	llmProviders.Put("/:id", llmProviderHandler.Update)
 	llmProviders.Delete("/:id", llmProviderHandler.Delete)

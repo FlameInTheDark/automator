@@ -178,7 +178,7 @@ func (r *ToolRegistry) registerKubernetesTools() {
 			Parameters: r.kubernetesToolParameters(map[string]any{
 				"namespace":     map[string]any{"type": "string", "description": "Optional namespace override for namespaced resources."},
 				"manifest":      map[string]any{"type": "string", "description": "YAML or JSON manifest to apply."},
-				"field_manager": map[string]any{"type": "string", "description": "Optional field manager name. Defaults to automator."},
+				"field_manager": map[string]any{"type": "string", "description": "Optional field manager name. Defaults to emerald."},
 				"force":         map[string]any{"type": "boolean", "description": "Force ownership conflicts during apply."},
 			}, "manifest"),
 		},

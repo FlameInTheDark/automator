@@ -67,3 +67,35 @@ func TestListModelsOllama(t *testing.T) {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 }
+
+func TestListModelsCustomProvider(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Fatalf("unexpected authorization header: %q", got)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"custom/alpha","name":"Alpha"},{"id":"custom/beta","name":"Beta"}]}`)
+	}))
+	defer server.Close()
+
+	models, err := ListModels(context.Background(), Config{
+		ProviderType: ProviderCustom,
+		APIKey:       "secret",
+		BaseURL:      server.URL,
+	})
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+
+	if models[0].ID != "custom/alpha" || models[1].ID != "custom/beta" {
+		t.Fatalf("unexpected models: %#v", models)
+	}
+}

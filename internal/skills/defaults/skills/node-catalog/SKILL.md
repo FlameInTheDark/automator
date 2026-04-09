@@ -1,6 +1,6 @@
 ---
 name: node-catalog
-description: Compact reference for important Automator node families, common config shapes, and when to use each category. Use when choosing nodes, understanding existing nodes, or mapping a user request to pipeline components.
+description: Compact reference for important Emerald node families, common config shapes, and when to use each category. Use when choosing nodes, understanding existing nodes, or mapping a user request to pipeline components.
 ---
 
 Use this skill when the task is to identify which node types fit a pipeline step.

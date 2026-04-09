@@ -1,6 +1,6 @@
 ---
 name: templating-guide
-description: Guide for Automator template interpolation, runtime context lookup, and pipeline parameter passing. Use when writing prompts, config fields, JSON params, or explaining how `input`, `arguments`, and other template values resolve.
+description: Guide for Emerald template interpolation, runtime context lookup, and pipeline parameter passing. Use when writing prompts, config fields, JSON params, or explaining how `input`, `arguments`, and other template values resolve.
 ---
 
 Use this skill when the task is about `{{ ... }}` templates in node configuration.

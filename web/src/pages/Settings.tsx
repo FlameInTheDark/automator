@@ -10,6 +10,7 @@ import Badge from '../components/ui/Badge'
 import Skeleton from '../components/ui/Skeleton'
 import KubernetesClusterSettings from '../components/Settings/KubernetesClusterSettings'
 import AssistantProfilesSettings from '../components/Settings/AssistantProfilesSettings'
+import ProviderModelSelector from '../components/Settings/ProviderModelSelector'
 import { useUIStore } from '../store/ui'
 import { cn } from '../lib/utils'
 import { AUTH_SESSION_QUERY_KEY, useAuthSession } from '../lib/auth'
@@ -103,7 +104,7 @@ function getDefaultChannelForm(): ChannelFormState {
     name: '',
     type: 'telegram',
     bot_token: '',
-    welcome_message: 'Welcome! Use this one-time code to connect this chat to Automator.',
+    welcome_message: 'Welcome! Use this one-time code to connect this chat to Emerald.',
     enabled: true,
   }
 }
@@ -936,10 +937,10 @@ function ChannelSettings() {
                     value={form.welcome_message}
                     onChange={(e) => setForm({ ...form, welcome_message: e.target.value })}
                     rows={4}
-                    placeholder="Welcome! Use this one-time code to connect this chat to Automator."
+                    placeholder="Welcome! Use this one-time code to connect this chat to Emerald."
                   />
                   <p className="mt-2 text-xs text-text-dimmed">
-                    The connect button link is generated automatically from this Automator URL.
+                    The connect button link is generated automatically from this Emerald URL.
                   </p>
                 </div>
                 <div className="sm:col-span-2 flex items-center gap-2">
@@ -1112,6 +1113,11 @@ function LLMSettings() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!form.model.trim()) {
+      addToast({ type: 'warning', title: 'Model is required' })
+      return
+    }
+
     if (editingProviderId) {
       updateMutation.mutate()
       return
@@ -1206,21 +1212,23 @@ function LLMSettings() {
                     required={form.provider_type !== 'ollama'}
                   />
                 </div>
-                <div>
-                  <Label>Model</Label>
-                  <Input
-                    value={form.model}
-                    onChange={(e) => setForm({ ...form, model: e.target.value })}
-                    placeholder={getProviderModelPlaceholder(form.provider_type)}
-                    required
-                  />
-                </div>
                 <div className="sm:col-span-2">
                   <Label>Base URL</Label>
                   <Input
                     value={form.base_url}
                     onChange={(e) => setForm({ ...form, base_url: e.target.value })}
                     placeholder={getProviderDefaultBaseURL(form.provider_type) || 'https://api.openai.com/v1'}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Label>Model</Label>
+                  <ProviderModelSelector
+                    value={form.model}
+                    providerType={form.provider_type}
+                    apiKey={form.api_key}
+                    baseURL={form.base_url}
+                    placeholder={getProviderModelPlaceholder(form.provider_type)}
+                    onChange={(model) => setForm((current) => ({ ...current, model }))}
                   />
                 </div>
                 <div className="sm:col-span-2 flex items-center gap-2">

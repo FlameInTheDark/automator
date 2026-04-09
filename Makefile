@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := build
 
-APP_NAME := automator$(if $(filter Windows_NT,$(OS)),.exe,)
+APP_NAME := emerald$(if $(filter Windows_NT,$(OS)),.exe,)
 WEB_DIR := web
 WEB_DEPS := $(WEB_DIR)/node_modules/.install-stamp
 EMBED_DIR := internal/api/web/dist
@@ -42,7 +42,7 @@ lint:
 	golangci-lint run
 
 docker:
-	docker build -t automator .
+	docker build -t emerald .
 
 docker-run:
 	docker-compose up -d

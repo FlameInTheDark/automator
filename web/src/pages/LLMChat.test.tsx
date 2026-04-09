@@ -173,7 +173,7 @@ describe('LLMChat page', () => {
 
     expect(await screen.findByText('New conversation')).toBeInTheDocument()
     expect(screen.getByText('Pick a starter or start typing below.')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/Message Automator/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Message Emerald/i)).toBeInTheDocument()
     expect(screen.getByText('Your first sent message will create one here.')).toBeInTheDocument()
   })
 
@@ -181,7 +181,7 @@ describe('LLMChat page', () => {
     const user = userEvent.setup()
     renderChat('/chat')
 
-    const composer = await screen.findByPlaceholderText(/Message Automator/i)
+    const composer = await screen.findByPlaceholderText(/Message Emerald/i)
     await waitFor(() => expect(composer).toBeEnabled())
     await user.type(composer, 'Hello{shift>}{enter}{/shift}there')
 
@@ -254,7 +254,7 @@ describe('LLMChat page', () => {
 
     renderChat('/chat')
 
-    const composer = await screen.findByPlaceholderText(/Message Automator/i)
+    const composer = await screen.findByPlaceholderText(/Message Emerald/i)
     await waitFor(() => expect(composer).toBeEnabled())
     await user.type(composer, 'Hello world{enter}')
 
@@ -282,7 +282,7 @@ describe('LLMChat page', () => {
 
     renderChat('/chat')
 
-    const composer = await screen.findByPlaceholderText(/Message Automator/i)
+    const composer = await screen.findByPlaceholderText(/Message Emerald/i)
     await waitFor(() => expect(composer).toBeEnabled())
     await user.type(composer, 'Stream this{enter}')
 
@@ -393,7 +393,7 @@ describe('LLMChat page', () => {
 
     renderChat('/chat')
 
-    const composer = await screen.findByPlaceholderText(/Message Automator/i)
+    const composer = await screen.findByPlaceholderText(/Message Emerald/i)
     await waitFor(() => expect(composer).toBeEnabled())
 
     await user.type(composer, 'Rate limit me{enter}')

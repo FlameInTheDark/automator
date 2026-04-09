@@ -1,6 +1,6 @@
 ---
 name: llm-tool-edge-rules
-description: Rules for connecting `llm:agent` nodes to `tool:*` nodes in Automator. Use when adding, moving, or validating agent tool wiring or explaining why a tool edge is invalid.
+description: Rules for connecting `llm:agent` nodes to `tool:*` nodes in Emerald. Use when adding, moving, or validating agent tool wiring or explaining why a tool edge is invalid.
 ---
 
 Use this skill when the task is specifically about agent tool wiring.
