@@ -47,6 +47,8 @@ interface AutomatorNodeData {
   executionLog?: NodeExecutionLogData
   canViewLog?: boolean
   onViewLog?: () => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
 }
 
 type LogicOutlet = {
@@ -160,6 +162,8 @@ function AutomatorNode({ data, selected }: { data: AutomatorNodeData; selected: 
             minHeight={180}
             color={groupColor}
             className="nodrag nopan"
+            onResizeStart={() => data.onResizeStart?.()}
+            onResizeEnd={() => data.onResizeEnd?.()}
           >
             <div
               className="h-3.5 w-3.5 rounded-sm border-2 bg-bg-elevated shadow-lg"

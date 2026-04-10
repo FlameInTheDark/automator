@@ -14,9 +14,13 @@ interface UIState {
 
   showExecutionLog: boolean
   toggleExecutionLog: () => void
+
+  activeLeaveConfirmation: (() => Promise<boolean>) | null
+  setActiveLeaveConfirmation: (confirmation: (() => Promise<boolean>) | null) => void
+  requestActiveLeaveConfirmation: () => Promise<boolean>
 }
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   sidebarCollapsed: true,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
@@ -33,4 +37,15 @@ export const useUIStore = create<UIState>((set) => ({
 
   showExecutionLog: false,
   toggleExecutionLog: () => set((s) => ({ showExecutionLog: !s.showExecutionLog })),
+
+  activeLeaveConfirmation: null,
+  setActiveLeaveConfirmation: (confirmation) => set({ activeLeaveConfirmation: confirmation }),
+  requestActiveLeaveConfirmation: async () => {
+    const confirmation = get().activeLeaveConfirmation
+    if (!confirmation) {
+      return true
+    }
+
+    return confirmation()
+  },
 }))

@@ -1,12 +1,11 @@
-import { useCallback, useRef, useState, useEffect, type MouseEvent as ReactMouseEvent } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useCallback, useRef, useState, useEffect, type ComponentProps, type MouseEvent as ReactMouseEvent } from 'react'
+import { useParams, useNavigate, useBlocker } from 'react-router-dom'
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  useNodesState,
-  useEdgesState,
   applyNodeChanges,
+  applyEdgeChanges,
   addEdge,
   type OnConnect,
   type Node,
@@ -41,6 +40,7 @@ import Modal from '../components/ui/Modal'
 import { buildPipelineDocument, extractSingleDefinitionDocument } from '../lib/documents'
 import { downloadJSON, sanitizeFilename } from '../lib/download'
 import { applyLivePipelineOperations } from '../lib/editorAssistant'
+import { usePipelineDraftHistory, type PipelineDraftState } from '../hooks/usePipelineDraftHistory'
 import { cn } from '../lib/utils'
 import type { EditorAssistantExecutionLogAttachment, ExecutionDetail, FlowDefinitionDocument, LLMProvider, LivePipelineOperation, NodeExecutionLogData, Pipeline, PipelineRunResponse, NodeType, TemplateSummary } from '../types'
 
@@ -148,6 +148,10 @@ type EditorContextMenuState = {
   searchPlaceholder?: string
   emptyMessage?: string
 }
+
+type NodeDimensionsChange = Extract<Parameters<OnNodesChange>[0][number], { type: 'dimensions' }>
+type SelectionContextMenuHandler = NonNullable<ComponentProps<typeof ReactFlow>['onSelectionContextMenu']>
+type PaneContextMenuHandler = NonNullable<ComponentProps<typeof ReactFlow>['onPaneContextMenu']>
 
 const VISUAL_GROUP_TYPE: NodeType = 'visual:group'
 const DEFAULT_GROUP_COLOR = '#64748b'
@@ -358,12 +362,67 @@ function hydratePersistedEdge(rawEdge: any): Edge {
   }
 }
 
+function stripTransientNodeData(rawData: unknown): Record<string, unknown> {
+  const data = typeof rawData === 'object' && rawData !== null
+    ? rawData as Record<string, unknown>
+    : {}
+
+  const {
+    status: _status,
+    isHighlight: _isHighlight,
+    executionLog: _executionLog,
+    canViewLog: _canViewLog,
+    onViewLog: _onViewLog,
+    onResizeStart: _onResizeStart,
+    onResizeEnd: _onResizeEnd,
+    ...rest
+  } = data
+
+  return rest
+}
+
+function stripTransientEdgeData(rawData: unknown): Record<string, unknown> | undefined {
+  if (typeof rawData !== 'object' || rawData === null) {
+    return undefined
+  }
+
+  const {
+    useGradient: _useGradient,
+    gradientStartColor: _gradientStartColor,
+    gradientEndColor: _gradientEndColor,
+    ...rest
+  } = rawData as Record<string, unknown>
+
+  return Object.keys(rest).length > 0 ? rest : undefined
+}
+
 function serializeFlowNodes(nodes: Node[]) {
-  return normalizeNodesForSubflows(nodes).map(({ type: _type, ...rest }) => rest)
+  return normalizeNodesForSubflows(nodes).map((node) => {
+    const {
+      type: _type,
+      selected: _selected,
+      dragging: _dragging,
+      positionAbsolute: _positionAbsolute,
+      measured: _measured,
+      resizing: _resizing,
+      data,
+      ...rest
+    } = node as Node & Record<string, unknown>
+
+    return {
+      ...rest,
+      data: stripTransientNodeData(data),
+    }
+  })
 }
 
 function serializeFlowEdges(edges: Edge[]) {
-  return edges.map(({ ...rest }) => rest)
+  return edges.map((edge) => {
+    const { selected: _selected, data, ...rest } = edge as Edge & Record<string, unknown>
+
+    const nextData = stripTransientEdgeData(data)
+    return nextData ? { ...rest, data: nextData } : rest
+  })
 }
 
 function buildFlowDefinitionDocument(
@@ -383,6 +442,38 @@ function buildImportedFlow(definition: FlowDefinitionDocument): { nodes: Node[];
     nodes: (definition.nodes || []).map((node) => hydratePersistedNode(node)),
     edges: (definition.edges || []).map((edge) => hydratePersistedEdge(edge)),
   }
+}
+
+function createPipelineDraftState(values: PipelineDraftState): PipelineDraftState {
+  return {
+    nodes: values.nodes,
+    edges: values.edges,
+    pipelineName: values.pipelineName,
+    pipelineDescription: values.pipelineDescription,
+  }
+}
+
+function canonicalizePipelineDraftState(draft: PipelineDraftState): PipelineDraftState {
+  const importedFlow = buildImportedFlow({
+    nodes: serializeFlowNodes(draft.nodes) as unknown[],
+    edges: serializeFlowEdges(draft.edges) as unknown[],
+  })
+
+  return {
+    nodes: normalizeNodesForSubflows(importedFlow.nodes),
+    edges: importedFlow.edges,
+    pipelineName: draft.pipelineName,
+    pipelineDescription: draft.pipelineDescription,
+  }
+}
+
+function serializePipelineDraftState(draft: PipelineDraftState): string {
+  return JSON.stringify({
+    pipelineName: draft.pipelineName,
+    pipelineDescription: draft.pipelineDescription,
+    nodes: serializeFlowNodes(draft.nodes),
+    edges: serializeFlowEdges(draft.edges),
+  })
 }
 
 function buildGeneratedNodeId(node: Node) {
@@ -814,6 +905,7 @@ function PipelineEditor() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const addJSONTemplateInputRef = useRef<HTMLInputElement>(null)
   const copiedSelectionRef = useRef<CopiedSelectionSnapshot | null>(null)
+  const pasteIterationRef = useRef(0)
   const lastCanvasPointerClientPositionRef = useRef<FlowPoint | null>(null)
   const isCanvasPointerActiveRef = useRef(false)
   const {
@@ -824,14 +916,37 @@ function PipelineEditor() {
     zoomOut,
     fitView: fitCanvasView,
   } = useReactFlow()
-  const { selectedNodeId, setSelectedNodeId, addToast } = useUIStore()
+  const { selectedNodeId, setSelectedNodeId, addToast, setActiveLeaveConfirmation } = useUIStore()
+  const emptyDraft = useRef<PipelineDraftState>({
+    nodes: [],
+    edges: [],
+    pipelineName: '',
+    pipelineDescription: '',
+  })
+  const {
+    draft,
+    savedDraft,
+    replaceDraft,
+    commitDraft,
+    updateDraftLive,
+    beginInteraction,
+    commitInteraction,
+    markSaved,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    isDirty,
+    hasPendingInteraction,
+  } = usePipelineDraftHistory({
+    initialDraft: emptyDraft.current,
+    sanitizeDraft: canonicalizePipelineDraftState,
+    serializeDraft: serializePipelineDraftState,
+  })
 
-  const [nodes, setNodes] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const { nodes, edges, pipelineName, pipelineDescription } = draft
   const [isSaving, setIsSaving] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
-  const [pipelineName, setPipelineName] = useState('')
-  const [pipelineDescription, setPipelineDescription] = useState('')
   const [pipelineStatus, setPipelineStatus] = useState<Pipeline['status']>('draft')
   const [editingDetails, setEditingDetails] = useState(false)
   const [showExecutionLog, setShowExecutionLog] = useState(false)
@@ -848,10 +963,13 @@ function PipelineEditor() {
   const [assistantLogAttachment, setAssistantLogAttachment] = useState<EditorAssistantExecutionLogAttachment | null>(null)
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false)
   const [showTemplateLibraryModal, setShowTemplateLibraryModal] = useState(false)
+  const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false)
   const [templateDraftName, setTemplateDraftName] = useState('')
   const [templateDraftDescription, setTemplateDraftDescription] = useState('')
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const leaveResolverRef = useRef<((value: boolean) => void) | null>(null)
+  const leavePromiseRef = useRef<Promise<boolean> | null>(null)
   const selectedNodes = nodes.filter((node) => node.selected)
   const selectedNodeIds = selectedNodes.map((node) => node.id)
   const activeSelectionIds = selectedNodeIds.length > 0
@@ -862,7 +980,8 @@ function PipelineEditor() {
   const activeSelectionIdSet = new Set(activeSelectionIds)
   const activeSelectionNodes = nodes.filter((node) => activeSelectionIdSet.has(node.id))
   const activeSelectionDuplicationIssue = getSelectionDuplicationIssue(activeSelectionNodes)
-  const isCanvasInteractionBlocked = isBlockingOverlayOpen || showSaveTemplateModal || showTemplateLibraryModal || templateMenuPosition !== null || assistantEditLockActive
+  const selectedEdgeIds = edges.filter((edge) => edge.selected).map((edge) => edge.id)
+  const isCanvasInteractionBlocked = isBlockingOverlayOpen || showSaveTemplateModal || showTemplateLibraryModal || showLeaveConfirmModal || templateMenuPosition !== null || assistantEditLockActive
   const isCanvasInteractionDisabled = isCanvasInteractionBlocked || !isFlowInteractive
 
   const { data: pipeline, isLoading } = useQuery<Pipeline>({
@@ -881,9 +1000,29 @@ function PipelineEditor() {
     queryFn: () => api.llmProviders.list(),
   })
 
+  const buildCurrentDraft = useCallback((): PipelineDraftState => (
+    createPipelineDraftState({
+      nodes,
+      edges,
+      pipelineName,
+      pipelineDescription,
+    })
+  ), [edges, nodes, pipelineDescription, pipelineName])
+
   const buildCurrentDefinition = useCallback((): FlowDefinitionDocument => (
     buildFlowDefinitionDocument(nodes, edges, getViewport())
   ), [edges, getViewport, nodes])
+
+  const syncSelectedNodeIdFromNodes = useCallback((nextNodes: Node[]) => {
+    const nextSelectedNodes = nextNodes.filter((node) => node.selected)
+
+    if (nextSelectedNodes.length === 1) {
+      setSelectedNodeId(nextSelectedNodes[0].id)
+      return
+    }
+
+    setSelectedNodeId(null)
+  }, [setSelectedNodeId])
 
   const updateCanvasPointerPosition = useCallback((clientPosition: FlowPoint) => {
     isCanvasPointerActiveRef.current = true
@@ -926,8 +1065,6 @@ function PipelineEditor() {
   useEffect(() => {
     if (pipeline) {
       try {
-        setPipelineName(pipeline.name)
-        setPipelineDescription(pipeline.description || '')
         setPipelineStatus((pipeline.status as Pipeline['status']) || 'draft')
         const parsedNodes = JSON.parse(pipeline.nodes || '[]')
         const parsedEdges = JSON.parse(pipeline.edges || '[]')
@@ -935,13 +1072,24 @@ function PipelineEditor() {
           nodes: parsedNodes,
           edges: parsedEdges,
         })
-        setNodes(normalizeNodesForSubflows(flow.nodes))
-        setEdges(flow.edges)
+        replaceDraft({
+          nodes: normalizeNodesForSubflows(flow.nodes),
+          edges: flow.edges,
+          pipelineName: pipeline.name,
+          pipelineDescription: pipeline.description || '',
+        }, {
+          clearHistory: true,
+          markSaved: true,
+        })
+        setSelectedNodeId(null)
+        setContextMenu(null)
+        setTemplateMenuPosition(null)
+        setEditingDetails(false)
       } catch (err) {
         console.error('Failed to parse pipeline data:', err)
       }
     }
-  }, [pipeline])
+  }, [pipeline, replaceDraft, setSelectedNodeId])
 
   useEffect(() => {
     if (editingDetails && nameInputRef.current) {
@@ -964,21 +1112,142 @@ function PipelineEditor() {
         status: nextStatus || pipelineStatus,
       })
     },
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['pipeline', id] })
-      queryClient.invalidateQueries({ queryKey: ['pipelines'] })
+  })
+
+  const saveCurrentPipeline = useCallback(async (nextStatus?: Pipeline['status']) => {
+    if (!id) {
+      return false
+    }
+
+    const draftAtSaveTime = buildCurrentDraft()
+    setIsSaving(true)
+
+    try {
+      const result = await saveMutation.mutateAsync(nextStatus)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pipeline', id] }),
+        queryClient.invalidateQueries({ queryKey: ['pipelines'] }),
+      ])
+
       if (result?.status) {
         setPipelineStatus(result.status as Pipeline['status'])
       }
+
+      markSaved(draftAtSaveTime)
       setEditingDetails(false)
       addToast({ type: 'success', title: 'Pipeline saved' })
+      return true
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: 'Failed to save',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      })
+      return false
+    } finally {
       setIsSaving(false)
-    },
-    onError: (err) => {
-      addToast({ type: 'error', title: 'Failed to save', message: err.message })
-      setIsSaving(false)
-    },
-  })
+    }
+  }, [addToast, buildCurrentDraft, id, markSaved, queryClient, saveMutation])
+
+  const blocker = useBlocker(isDirty)
+
+  const resolveLeaveConfirmation = useCallback((shouldLeave: boolean) => {
+    leaveResolverRef.current?.(shouldLeave)
+    leaveResolverRef.current = null
+    leavePromiseRef.current = null
+    setShowLeaveConfirmModal(false)
+  }, [])
+
+  const requestLeaveConfirmation = useCallback(() => {
+    if (!isDirty) {
+      return Promise.resolve(true)
+    }
+
+    if (leavePromiseRef.current) {
+      return leavePromiseRef.current
+    }
+
+    setShowLeaveConfirmModal(true)
+    leavePromiseRef.current = new Promise<boolean>((resolve) => {
+      leaveResolverRef.current = resolve
+    })
+
+    return leavePromiseRef.current
+  }, [isDirty])
+
+  const handleCancelLeave = useCallback(() => {
+    resolveLeaveConfirmation(false)
+  }, [resolveLeaveConfirmation])
+
+  const handleLeaveWithoutSaving = useCallback(() => {
+    resolveLeaveConfirmation(true)
+  }, [resolveLeaveConfirmation])
+
+  const handleSaveAndContinue = useCallback(async () => {
+    const didSave = await saveCurrentPipeline()
+    if (!didSave) {
+      return
+    }
+
+    resolveLeaveConfirmation(true)
+  }, [resolveLeaveConfirmation, saveCurrentPipeline])
+
+  useEffect(() => {
+    setActiveLeaveConfirmation(requestLeaveConfirmation)
+
+    return () => {
+      setActiveLeaveConfirmation(null)
+    }
+  }, [requestLeaveConfirmation, setActiveLeaveConfirmation])
+
+  useEffect(() => {
+    return () => {
+      if (leaveResolverRef.current) {
+        leaveResolverRef.current(false)
+        leaveResolverRef.current = null
+      }
+
+      leavePromiseRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') {
+      return
+    }
+
+    let cancelled = false
+
+    void requestLeaveConfirmation().then((shouldProceed) => {
+      if (cancelled) {
+        return
+      }
+
+      if (shouldProceed) {
+        blocker.proceed()
+      } else {
+        blocker.reset()
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [blocker, requestLeaveConfirmation])
+
+  useEffect(() => {
+    if (!isDirty) {
+      return
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isDirty])
 
   const appendDefinitionToCanvas = useCallback((definition: FlowDefinitionDocument, sourceName: string) => {
     const importedFlow = buildImportedFlow(definition)
@@ -1066,11 +1335,14 @@ function PipelineEditor() {
       }]
     })
 
-    setNodes((currentNodes) => normalizeNodesForSubflows([
-      ...currentNodes.map((node) => ({ ...node, selected: false })),
-      ...insertedNodes,
-    ]))
-    setEdges((currentEdges) => currentEdges.concat(insertedEdges))
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: normalizeNodesForSubflows([
+        ...currentDraft.nodes.map((node) => ({ ...node, selected: false })),
+        ...insertedNodes,
+      ]),
+      edges: currentDraft.edges.concat(insertedEdges),
+    }))
     setSelectedNodeId(firstInsertedNodeId)
     setContextMenu(null)
 
@@ -1097,7 +1369,7 @@ function PipelineEditor() {
         duration: 6500,
       })
     }
-  }, [addToast, nodes, screenToFlowPosition, setEdges, setNodes, setSelectedNodeId])
+  }, [addToast, commitDraft, nodes, screenToFlowPosition, setSelectedNodeId])
 
   const handleApplyAssistantOperations = useCallback(async (operations: LivePipelineOperation[]) => {
     if (operations.length === 0) {
@@ -1111,14 +1383,17 @@ function PipelineEditor() {
       operations,
     })
 
-    setNodes(normalizeNodesForSubflows(nextState.nodes))
-    setEdges(nextState.edges)
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: normalizeNodesForSubflows(nextState.nodes),
+      edges: nextState.edges,
+    }))
     void setCanvasViewport(nextState.viewport)
 
     if (selectedNodeId && !nextState.nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(null)
     }
-  }, [edges, getViewport, nodes, selectedNodeId, setCanvasViewport, setEdges, setNodes, setSelectedNodeId])
+  }, [commitDraft, edges, getViewport, nodes, selectedNodeId, setCanvasViewport, setSelectedNodeId])
 
   const saveTemplateMutation = useMutation({
     mutationFn: (payload: { name: string; description?: string }) => api.templates.create({
@@ -1179,14 +1454,12 @@ function PipelineEditor() {
   })
 
   const handleSave = useCallback(() => {
-    setIsSaving(true)
-    saveMutation.mutate(undefined)
-  }, [saveMutation])
+    void saveCurrentPipeline()
+  }, [saveCurrentPipeline])
 
   const handleToggleStatus = useCallback((nextStatus: Pipeline['status']) => {
-    setIsSaving(true)
-    saveMutation.mutate(nextStatus)
-  }, [saveMutation])
+    void saveCurrentPipeline(nextStatus)
+  }, [saveCurrentPipeline])
 
   const handleRun = useCallback(() => {
     setShowExecutionLog(true)
@@ -1195,10 +1468,13 @@ function PipelineEditor() {
   }, [runMutation])
 
   const handleCancelDetailsEdit = useCallback(() => {
-    setPipelineName(pipeline?.name || '')
-    setPipelineDescription(pipeline?.description || '')
+    updateDraftLive((currentDraft) => ({
+      ...currentDraft,
+      pipelineName: savedDraft.pipelineName,
+      pipelineDescription: savedDraft.pipelineDescription,
+    }))
     setEditingDetails(false)
-  }, [pipeline])
+  }, [savedDraft.pipelineDescription, savedDraft.pipelineName, updateDraftLive])
 
   const handleOpenSaveTemplateModal = useCallback(() => {
     setTemplateMenuPosition(null)
@@ -1306,6 +1582,36 @@ function PipelineEditor() {
     }
   }, [activeNodeLogId, nodeLogs])
 
+  const applyNodeChangesWithConstraints = useCallback((changes: Parameters<OnNodesChange>[0], currentNodes: Node[]) => {
+    return applyNodeChanges(changes, currentNodes).map((node) => {
+      if (!isGroupNode(node)) {
+        return node
+      }
+
+      const dimensionChange = changes.find((change): change is NodeDimensionsChange => (
+        change.type === 'dimensions' && change.id === node.id
+      ))
+      if (!dimensionChange || !dimensionChange.dimensions) {
+        return node
+      }
+
+      const minDimensions = getMinimumGroupDimensions(node, currentNodes)
+      const width = Math.max(dimensionChange.dimensions.width, minDimensions.width)
+      const height = Math.max(dimensionChange.dimensions.height, minDimensions.height)
+
+      return {
+        ...node,
+        width,
+        height,
+        style: {
+          ...node.style,
+          width,
+          height,
+        },
+      }
+    })
+  }, [])
+
   const onConnect: OnConnect = useCallback(
     (params) => {
       const sourceNode = nodes.find((node) => node.id === params.source)
@@ -1361,12 +1667,15 @@ function PipelineEditor() {
         return
       }
 
-      setEdges((eds) => addEdge({
-        ...params,
-        ...(isToolConnection ? toolEdgeOptions : defaultEdgeOptions),
-      }, eds))
+      commitDraft((currentDraft) => ({
+        ...currentDraft,
+        edges: addEdge({
+          ...params,
+          ...(isToolConnection ? toolEdgeOptions : defaultEdgeOptions),
+        }, currentDraft.edges),
+      }))
     },
-    [addToast, nodes, setEdges],
+    [addToast, commitDraft, nodes],
   )
 
   const createNodeAtPosition = useCallback((
@@ -1400,9 +1709,12 @@ function PipelineEditor() {
       },
     }
 
-    setNodes((nds) => nds.concat(newNode))
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: currentDraft.nodes.concat(newNode),
+    }))
     setSelectedNodeId(newNode.id)
-  }, [addToast, nodes, screenToFlowPosition, setNodes, setSelectedNodeId])
+  }, [addToast, commitDraft, nodes, screenToFlowPosition, setSelectedNodeId])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     if (!isFlowInteractive) {
@@ -1440,51 +1752,57 @@ function PipelineEditor() {
 
   const onNodesChangeHandler: OnNodesChange = useCallback(
     (changes) => {
-      setNodes((currentNodes) => {
-        const nextNodes = applyNodeChanges(changes, currentNodes).map((node) => {
-          if (!isGroupNode(node)) {
-            return node
+      const applyChanges = (currentDraft: PipelineDraftState) => {
+        const nextNodes = applyNodeChangesWithConstraints(changes, currentDraft.nodes)
+        syncSelectedNodeIdFromNodes(nextNodes)
+
+        return {
+          ...currentDraft,
+          nodes: nextNodes,
+        }
+      }
+
+      const isSelectionOnly = changes.every((change) => change.type === 'select')
+      const isRuntimeMeasurementOnly = changes.every((change) => (
+        change.type === 'dimensions' && !change.resizing
+      ))
+      const containsDragUpdate = changes.some((change) => change.type === 'position' && change.dragging)
+      const containsResizeUpdate = changes.some((change) => change.type === 'dimensions' && change.resizing)
+      const containsInteractiveGeometryChange = changes.some((change) => (
+        change.type === 'position' || change.type === 'dimensions'
+      ))
+
+      if (isSelectionOnly || isRuntimeMeasurementOnly) {
+        updateDraftLive(applyChanges)
+        setContextMenu(null)
+        return
+      }
+
+      if (containsInteractiveGeometryChange) {
+        if (containsDragUpdate || containsResizeUpdate || hasPendingInteraction) {
+          if (containsDragUpdate || containsResizeUpdate) {
+            beginInteraction()
           }
 
-          const dimensionChange = changes.find((change) => change.type === 'dimensions' && change.id === node.id)
-          if (!dimensionChange || !dimensionChange.dimensions) {
-            return node
-          }
-
-          const minDimensions = getMinimumGroupDimensions(node, currentNodes)
-          const width = Math.max(dimensionChange.dimensions.width, minDimensions.width)
-          const height = Math.max(dimensionChange.dimensions.height, minDimensions.height)
-
-          return {
-            ...node,
-            width,
-            height,
-            style: {
-              ...node.style,
-              width,
-              height,
-            },
-          }
-        })
-        const nextSelectedNodes = nextNodes.filter((node) => node.selected)
-
-        if (nextSelectedNodes.length === 1) {
-          setSelectedNodeId(nextSelectedNodes[0].id)
+          updateDraftLive(applyChanges)
         } else {
-          setSelectedNodeId(null)
+          commitDraft(applyChanges)
         }
 
-        return nextNodes
-      })
+        setContextMenu(null)
+        return
+      }
+
+      commitDraft(applyChanges)
       setContextMenu(null)
     },
-    [setNodes, setSelectedNodeId],
+    [applyNodeChangesWithConstraints, beginInteraction, commitDraft, hasPendingInteraction, syncSelectedNodeIdFromNodes, updateDraftLive],
   )
 
   const handleNodeDragStop = useCallback((_: React.MouseEvent, _draggedNode: Node, draggedNodes: Node[]) => {
-    setNodes((currentNodes) => {
+    commitInteraction((currentDraft) => {
       const draggedNodesById = new Map(draggedNodes.map((node) => [node.id, node]))
-      let nextNodes = currentNodes.map((node) => {
+      let nextNodes = currentDraft.nodes.map((node) => {
         const draggedSnapshot = draggedNodesById.get(node.id)
         if (!draggedSnapshot) {
           return node
@@ -1550,9 +1868,15 @@ function PipelineEditor() {
         })
       })
 
-      return normalizeNodesForSubflows(nextNodes)
+      const normalizedNodes = normalizeNodesForSubflows(nextNodes)
+      syncSelectedNodeIdFromNodes(normalizedNodes)
+
+      return {
+        ...currentDraft,
+        nodes: normalizedNodes,
+      }
     })
-  }, [setNodes])
+  }, [commitInteraction, syncSelectedNodeIdFromNodes])
 
   const onDragStart = useCallback((event: React.DragEvent, nodeType: string, label: string, config: Record<string, unknown>) => {
     event.dataTransfer.setData('application/reactflow/type', nodeType)
@@ -1610,10 +1934,63 @@ function PipelineEditor() {
   }, [fitCanvasView])
   const canvasControlButtonClass = 'h-8 min-w-8 rounded-xl px-1.5 text-text-muted hover:text-text'
 
+  const handleUndo = useCallback(() => {
+    if (!canUndo) {
+      return
+    }
+
+    undo()
+    setSelectedNodeId(null)
+    setContextMenu(null)
+    setTemplateMenuPosition(null)
+  }, [canUndo, setSelectedNodeId, undo])
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) {
+      return
+    }
+
+    redo()
+    setSelectedNodeId(null)
+    setContextMenu(null)
+    setTemplateMenuPosition(null)
+  }, [canRedo, redo, setSelectedNodeId])
+
+  const handleGroupResizeStart = useCallback(() => {
+    beginInteraction()
+  }, [beginInteraction])
+
+  const handleGroupResizeEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      commitInteraction()
+    })
+  }, [commitInteraction])
+
+  const removeEdgesByIds = useCallback((edgeIds: string[]) => {
+    if (edgeIds.length === 0) {
+      return
+    }
+
+    const idsToRemove = new Set(edgeIds)
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      edges: currentDraft.edges.filter((edge) => !idsToRemove.has(edge.id)),
+    }))
+    setContextMenu(null)
+  }, [commitDraft])
+
+  const disconnectNodeById = useCallback((nodeId: string) => {
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      edges: currentDraft.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+    }))
+  }, [commitDraft])
+
   const updateNodeConfig = useCallback((config: Record<string, unknown>) => {
     if (!selectedNodeId) return
-    setNodes((nds) =>
-      nds.map((node) => {
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: currentDraft.nodes.map((node) => {
         if (node.id === selectedNodeId) {
           return {
             ...node,
@@ -1624,14 +2001,15 @@ function PipelineEditor() {
           }
         }
         return node
-      })
-    )
-  }, [selectedNodeId, setNodes])
+      }),
+    }))
+  }, [commitDraft, selectedNodeId])
 
   const updateNodeLabel = useCallback((label: string) => {
     if (!selectedNodeId) return
-    setNodes((nds) =>
-      nds.map((node) => {
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: currentDraft.nodes.map((node) => {
         if (node.id === selectedNodeId) {
           return {
             ...node,
@@ -1642,39 +2020,44 @@ function PipelineEditor() {
           }
         }
         return node
-      })
-    )
-  }, [selectedNodeId, setNodes])
+      }),
+    }))
+  }, [commitDraft, selectedNodeId])
 
   const removeSelectedNodeSourceHandles = useCallback((handleIds: string[]) => {
     if (!selectedNodeId || handleIds.length === 0) return
 
     const removedHandles = new Set(handleIds)
-    setEdges((eds) => eds.filter((edge) => (
-      edge.source !== selectedNodeId
-        || !edge.sourceHandle
-        || !removedHandles.has(edge.sourceHandle)
-    )))
-  }, [selectedNodeId, setEdges])
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      edges: currentDraft.edges.filter((edge) => (
+        edge.source !== selectedNodeId
+          || !edge.sourceHandle
+          || !removedHandles.has(edge.sourceHandle)
+      )),
+    }))
+  }, [commitDraft, selectedNodeId])
 
   const removeNodesByIds = useCallback((nodeIds: string[]) => {
     if (nodeIds.length === 0) return
 
     const idsToRemove = new Set(nodeIds)
 
-    setNodes((currentNodes) => {
+    commitDraft((currentDraft) => {
       const removedGroups = new Map(
-        currentNodes
+        currentDraft.nodes
           .filter((node) => idsToRemove.has(node.id) && isGroupNode(node))
           .map((node) => [node.id, { x: node.position.x, y: node.position.y }]),
       )
 
-      return normalizeNodesForSubflows(currentNodes.flatMap((node) => {
-        if (idsToRemove.has(node.id)) {
-          return []
-        }
+      return {
+        ...currentDraft,
+        nodes: normalizeNodesForSubflows(currentDraft.nodes.flatMap((node) => {
+          if (idsToRemove.has(node.id)) {
+            return []
+          }
 
-        if (node.parentId && removedGroups.has(node.parentId)) {
+          if (node.parentId && removedGroups.has(node.parentId)) {
           const parentPosition = removedGroups.get(node.parentId)!
 
           return [{
@@ -1687,29 +2070,32 @@ function PipelineEditor() {
             extent: undefined,
             selected: false,
           }]
-        }
+          }
 
-        return [node]
-      }))
+          return [node]
+        })),
+        edges: currentDraft.edges.filter((edge) => !idsToRemove.has(edge.source) && !idsToRemove.has(edge.target)),
+      }
     })
-    setEdges((currentEdges) => currentEdges.filter((edge) => !idsToRemove.has(edge.source) && !idsToRemove.has(edge.target)))
     setSelectedNodeId(null)
     setContextMenu(null)
-  }, [setEdges, setNodes, setSelectedNodeId])
+  }, [commitDraft, setSelectedNodeId])
 
   const ungroupNode = useCallback((groupId: string) => {
-    setNodes((currentNodes) => {
-      const groupNode = currentNodes.find((node) => node.id === groupId)
+    commitDraft((currentDraft) => {
+      const groupNode = currentDraft.nodes.find((node) => node.id === groupId)
       if (!groupNode || !isGroupNode(groupNode)) {
-        return currentNodes
+        return currentDraft
       }
 
-      return normalizeNodesForSubflows(currentNodes.flatMap((node) => {
-        if (node.id === groupId) {
-          return []
-        }
+      return {
+        ...currentDraft,
+        nodes: normalizeNodesForSubflows(currentDraft.nodes.flatMap((node) => {
+          if (node.id === groupId) {
+            return []
+          }
 
-        if (node.parentId === groupId) {
+          if (node.parentId === groupId) {
           return [{
             ...node,
             position: {
@@ -1720,14 +2106,15 @@ function PipelineEditor() {
             extent: undefined,
             selected: false,
           }]
-        }
+          }
 
-        return [node]
-      }))
+          return [node]
+        })),
+      }
     })
     setSelectedNodeId(null)
     setContextMenu(null)
-  }, [setNodes, setSelectedNodeId])
+  }, [commitDraft, setSelectedNodeId])
 
   const createGroupFromSelection = useCallback(() => {
     if (!canGroupNodes(selectedNodes)) {
@@ -1754,46 +2141,49 @@ function PipelineEditor() {
     const selectedIds = new Set(selectedNodes.map((node) => node.id))
     const groupLabel = getNextGroupLabel(nodes)
 
-    setNodes((currentNodes) => normalizeNodesForSubflows([
-      {
-        id: groupId,
-        type: 'automator',
-        position: groupPosition,
-        style: {
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: normalizeNodesForSubflows([
+        {
+          id: groupId,
+          type: 'automator',
+          position: groupPosition,
+          style: {
+            width: groupWidth,
+            height: groupHeight,
+          },
           width: groupWidth,
           height: groupHeight,
-        },
-        width: groupWidth,
-        height: groupHeight,
-        selected: true,
-        data: {
-          label: groupLabel,
-          type: VISUAL_GROUP_TYPE,
-          config: { color: DEFAULT_GROUP_COLOR },
-          enabled: true,
-        },
-      },
-      ...currentNodes.map((node) => {
-        if (!selectedIds.has(node.id)) {
-          return { ...node, selected: false }
-        }
-
-        return {
-          ...node,
-          position: {
-            x: node.position.x - groupPosition.x,
-            y: node.position.y - groupPosition.y,
+          selected: true,
+          data: {
+            label: groupLabel,
+            type: VISUAL_GROUP_TYPE,
+            config: { color: DEFAULT_GROUP_COLOR },
+            enabled: true,
           },
-          parentId: groupId,
-          extent: undefined,
-          selected: false,
-        }
-      }),
-    ]))
+        },
+        ...currentDraft.nodes.map((node) => {
+          if (!selectedIds.has(node.id)) {
+            return { ...node, selected: false }
+          }
+
+          return {
+            ...node,
+            position: {
+              x: node.position.x - groupPosition.x,
+              y: node.position.y - groupPosition.y,
+            },
+            parentId: groupId,
+            extent: undefined,
+            selected: false,
+          }
+        }),
+      ]),
+    }))
 
     setSelectedNodeId(groupId)
     setContextMenu(null)
-  }, [addToast, nodes, selectedNodes, setNodes, setSelectedNodeId])
+  }, [addToast, commitDraft, nodes, selectedNodes, setSelectedNodeId])
 
   const duplicateNodesByIds = useCallback((nodeIds: string[]) => {
     const selection = nodes.filter((node) => nodeIds.includes(node.id))
@@ -1813,14 +2203,17 @@ function PipelineEditor() {
       return
     }
 
-    setNodes((currentNodes) => normalizeNodesForSubflows([
-      ...currentNodes.map((node) => ({ ...node, selected: false })),
-      ...duplicatedSelection.nodes,
-    ]))
-    setEdges((currentEdges) => currentEdges.concat(duplicatedSelection.edges))
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: normalizeNodesForSubflows([
+        ...currentDraft.nodes.map((node) => ({ ...node, selected: false })),
+        ...duplicatedSelection.nodes,
+      ]),
+      edges: currentDraft.edges.concat(duplicatedSelection.edges),
+    }))
     setSelectedNodeId(duplicatedSelection.selectedNodeIds.length === 1 ? duplicatedSelection.selectedNodeIds[0] : null)
     setContextMenu(null)
-  }, [addToast, edges, nodes, setEdges, setNodes, setSelectedNodeId])
+  }, [addToast, commitDraft, edges, nodes, setSelectedNodeId])
 
   const copyNodesByIds = useCallback((nodeIds: string[]) => {
     const copiedSelection = buildCopiedSelectionSnapshot(nodes, edges, nodeIds)
@@ -1829,6 +2222,7 @@ function PipelineEditor() {
     }
 
     copiedSelectionRef.current = copiedSelection
+    pasteIterationRef.current = 0
     setContextMenu(null)
   }, [edges, nodes])
 
@@ -1852,21 +2246,41 @@ function PipelineEditor() {
       return
     }
 
-    setNodes((currentNodes) => normalizeNodesForSubflows([
-      ...currentNodes.map((node) => ({ ...node, selected: false })),
-      ...pastedSelection.nodes,
-    ]))
-    setEdges((currentEdges) => currentEdges.concat(pastedSelection.edges))
+    commitDraft((currentDraft) => ({
+      ...currentDraft,
+      nodes: normalizeNodesForSubflows([
+        ...currentDraft.nodes.map((node) => ({ ...node, selected: false })),
+        ...pastedSelection.nodes,
+      ]),
+      edges: currentDraft.edges.concat(pastedSelection.edges),
+    }))
+    pasteIterationRef.current += 1
     setSelectedNodeId(pastedSelection.selectedNodeIds.length === 1 ? pastedSelection.selectedNodeIds[0] : null)
     setContextMenu(null)
-  }, [addToast, nodes, setEdges, setNodes, setSelectedNodeId])
+  }, [addToast, commitDraft, nodes, setSelectedNodeId])
 
   const pasteCopiedSelectionAtClientPosition = useCallback((clientPosition: FlowPoint) => {
     pasteCopiedSelectionAtPosition(screenToFlowPosition(clientPosition))
   }, [pasteCopiedSelectionAtPosition, screenToFlowPosition])
 
   const pasteCopiedSelectionAtCursor = useCallback(() => {
-    pasteCopiedSelectionAtPosition(getActiveCanvasPastePosition())
+    const activePastePosition = getActiveCanvasPastePosition()
+    if (activePastePosition) {
+      pasteCopiedSelectionAtPosition(activePastePosition)
+      return
+    }
+
+    const copiedSelection = copiedSelectionRef.current
+    if (!copiedSelection) {
+      pasteCopiedSelectionAtPosition(null)
+      return
+    }
+
+    const nextPasteIteration = pasteIterationRef.current + 1
+    pasteCopiedSelectionAtPosition({
+      x: copiedSelection.center.x + (DUPLICATE_SELECTION_OFFSET.x * nextPasteIteration),
+      y: copiedSelection.center.y + (DUPLICATE_SELECTION_OFFSET.y * nextPasteIteration),
+    })
   }, [getActiveCanvasPastePosition, pasteCopiedSelectionAtPosition])
 
   const buildPaneContextMenuItems = useCallback((clientX: number, clientY: number): ContextMenuItem[] => {
@@ -2016,8 +2430,22 @@ function PipelineEditor() {
 
   const disconnectNode = useCallback(() => {
     if (!selectedNodeId) return
-    setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId))
-  }, [selectedNodeId, setEdges])
+    disconnectNodeById(selectedNodeId)
+  }, [disconnectNodeById, selectedNodeId])
+
+  const onEdgesChangeHandler: OnEdgesChange = useCallback((changes) => {
+    const applyChanges = (currentDraft: PipelineDraftState) => ({
+      ...currentDraft,
+      edges: applyEdgeChanges(changes, currentDraft.edges),
+    })
+
+    if (changes.every((change) => change.type === 'select')) {
+      updateDraftLive(applyChanges)
+      return
+    }
+
+    commitDraft(applyChanges)
+  }, [commitDraft, updateDraftLive])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2037,9 +2465,14 @@ function PipelineEditor() {
       const normalizedKey = e.key.toLowerCase()
       const isCanvasShortcutActive = isCanvasPointerActiveRef.current
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && activeSelectionIds.length > 0) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && isCanvasShortcutActive && (activeSelectionIds.length > 0 || selectedEdgeIds.length > 0)) {
         e.preventDefault()
-        removeNodesByIds(activeSelectionIds)
+        if (activeSelectionIds.length > 0) {
+          removeNodesByIds(activeSelectionIds)
+          return
+        }
+
+        removeEdgesByIds(selectedEdgeIds)
       }
       if ((e.ctrlKey || e.metaKey) && normalizedKey === 'c' && isCanvasShortcutActive && activeSelectionIds.length > 0) {
         e.preventDefault()
@@ -2061,11 +2494,24 @@ function PipelineEditor() {
         e.preventDefault()
         handleSave()
       }
+      if ((e.ctrlKey || e.metaKey) && normalizedKey === 'z' && isCanvasShortcutActive) {
+        e.preventDefault()
+        if (e.shiftKey) {
+          handleRedo()
+          return
+        }
+
+        handleUndo()
+      }
+      if ((e.ctrlKey || e.metaKey) && normalizedKey === 'y' && isCanvasShortcutActive) {
+        e.preventDefault()
+        handleRedo()
+      }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [activeSelectionIds, copyNodesByIds, disconnectNode, duplicateNodesByIds, handleSave, isCanvasInteractionDisabled, pasteCopiedSelectionAtCursor, removeNodesByIds, selectedNodeId])
+  }, [activeSelectionIds, copyNodesByIds, disconnectNode, duplicateNodesByIds, handleRedo, handleSave, handleUndo, isCanvasInteractionDisabled, pasteCopiedSelectionAtCursor, removeEdgesByIds, removeNodesByIds, selectedEdgeIds, selectedNodeId])
 
   const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault()
@@ -2128,9 +2574,7 @@ function PipelineEditor() {
         label: 'Disconnect',
         icon: <Scissors className="w-3.5 h-3.5" />,
         shortcut: 'Ctrl+K',
-        onClick: () => {
-          setEdges((eds) => eds.filter((e) => e.source !== node.id && e.target !== node.id))
-        },
+        onClick: () => disconnectNodeById(node.id),
       },
       {
         divider: true,
@@ -2146,7 +2590,7 @@ function PipelineEditor() {
       },
     ]
     setContextMenu({ x: event.clientX, y: event.clientY, items })
-  }, [buildSelectionContextMenuItems, copyNodesByIds, duplicateNodesByIds, isFlowInteractive, removeNodesByIds, selectedNodes, setSelectedNodeId, setEdges, ungroupNode])
+  }, [buildSelectionContextMenuItems, copyNodesByIds, disconnectNodeById, duplicateNodesByIds, isFlowInteractive, removeNodesByIds, selectedNodes, setSelectedNodeId, ungroupNode])
 
   const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault()
@@ -2160,15 +2604,13 @@ function PipelineEditor() {
         label: 'Delete connection',
         icon: <Scissors className="w-3.5 h-3.5" />,
         danger: true,
-        onClick: () => {
-          setEdges((eds) => eds.filter((e) => e.id !== edge.id))
-        },
+        onClick: () => removeEdgesByIds([edge.id]),
       },
     ]
     setContextMenu({ x: event.clientX, y: event.clientY, items })
-  }, [isFlowInteractive, setEdges])
+  }, [isFlowInteractive, removeEdgesByIds])
 
-  const handleSelectionContextMenu = useCallback((event: MouseEvent, selection: Node[]) => {
+  const handleSelectionContextMenu: SelectionContextMenuHandler = useCallback((event, selection) => {
     event.preventDefault()
     setTemplateMenuPosition(null)
     if (!isFlowInteractive) {
@@ -2183,7 +2625,7 @@ function PipelineEditor() {
     })
   }, [buildSelectionContextMenuItems, isFlowInteractive, setSelectedNodeId])
 
-  const handlePaneContextMenu = useCallback((event: React.MouseEvent) => {
+  const handlePaneContextMenu: PaneContextMenuHandler = useCallback((event) => {
     event.preventDefault()
 
     setTemplateMenuPosition(null)
@@ -2207,15 +2649,32 @@ function PipelineEditor() {
     const isHighlighted = highlightedNodes.has(node.id)
     const execStatus = nodeStatuses[node.id]
     const visualStatus = getVisualExecutionStatus(execStatus)
+    const resizeCallbacks = node.data?.type === VISUAL_GROUP_TYPE
+      ? {
+          onResizeStart: handleGroupResizeStart,
+          onResizeEnd: handleGroupResizeEnd,
+        }
+      : {}
 
     if (!isHighlightMode) {
-      return node
+      if (node.data?.type !== VISUAL_GROUP_TYPE) {
+        return node
+      }
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          ...resizeCallbacks,
+        },
+      }
     }
 
     return {
       ...node,
       data: {
         ...node.data,
+        ...resizeCallbacks,
         status: visualStatus,
         enabled: isHighlighted,
         isHighlight: isHighlighted,
@@ -2319,7 +2778,7 @@ function PipelineEditor() {
             nodes={renderedNodes}
             edges={renderedEdges}
             onNodesChange={onNodesChangeHandler}
-            onEdgesChange={onEdgesChange}
+            onEdgesChange={onEdgesChangeHandler}
             onConnect={onConnect}
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -2353,7 +2812,7 @@ function PipelineEditor() {
             zoomOnPinch={isFlowInteractive && !isCanvasInteractionBlocked}
             zoomOnDoubleClick={isFlowInteractive && !isCanvasInteractionBlocked}
             panActivationKeyCode={isCanvasInteractionDisabled ? null : 'Space'}
-            deleteKeyCode={isCanvasInteractionDisabled ? null : 'Backspace'}
+            deleteKeyCode={null}
             selectionKeyCode={isCanvasInteractionDisabled ? null : 'Shift'}
             multiSelectionKeyCode={isCanvasInteractionDisabled ? null : undefined}
             zoomActivationKeyCode={isCanvasInteractionDisabled ? null : undefined}
@@ -2397,7 +2856,13 @@ function PipelineEditor() {
                       <Input
                         ref={nameInputRef}
                         value={pipelineName}
-                        onChange={(e) => setPipelineName(e.target.value)}
+                        onChange={(e) => {
+                          const nextValue = e.target.value
+                          commitDraft((currentDraft) => ({
+                            ...currentDraft,
+                            pipelineName: nextValue,
+                          }))
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Escape') {
                             handleCancelDetailsEdit()
@@ -2408,7 +2873,13 @@ function PipelineEditor() {
                       />
                       <Textarea
                         value={pipelineDescription}
-                        onChange={(e) => setPipelineDescription(e.target.value)}
+                        onChange={(e) => {
+                          const nextValue = e.target.value
+                          commitDraft((currentDraft) => ({
+                            ...currentDraft,
+                            pipelineDescription: nextValue,
+                          }))
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Escape') {
                             handleCancelDetailsEdit()
@@ -2533,16 +3004,25 @@ function PipelineEditor() {
                     Template
                     {templateMenuPosition ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    loading={isSaving}
-                    onClick={handleSave}
-                    className="rounded-xl"
-                  >
-                    <Save className="w-4 h-4" />
-                    Save
-                  </Button>
+                  <div className="relative inline-flex shrink-0">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={isSaving}
+                      onClick={handleSave}
+                      className="rounded-xl"
+                    >
+                      <Save className="w-4 h-4" />
+                      Save
+                    </Button>
+                    {isDirty && (
+                      <span
+                        className="pointer-events-none absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-bg-elevated"
+                        aria-label="Unsaved changes"
+                        title="Unsaved changes"
+                      />
+                    )}
+                  </div>
                   <Button
                     size="sm"
                     loading={isRunning}
@@ -2556,34 +3036,40 @@ function PipelineEditor() {
               </FloatingEditorPanel>
             </Panel>
 
-            {activeSelectionIds.length > 0 && (
-              <Panel position="bottom-right" className="!m-4">
-                <div className="bg-bg-elevated border border-border rounded-lg shadow-lg p-2 flex gap-1">
-                  {!activeSelectionDuplicationIssue && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={duplicateActiveSelection}
-                      title={activeSelectionIds.length > 1 ? 'Duplicate selection' : 'Duplicate'}
-                    >
-                      <Copy className="w-4 h-4" />
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeNodesByIds(activeSelectionIds)}
-                    title={activeSelectionIds.length > 1 ? 'Delete selection' : 'Delete'}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-400" />
-                  </Button>
-                </div>
-              </Panel>
-            )}
-
             <EditorAssistantDock
-              triggerControlsLeft={(
-                <>
+              triggerControlGroupsLeft={[
+                canUndo || canRedo ? (
+                  <>
+                    {canUndo && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleUndo}
+                        disabled={isCanvasInteractionBlocked}
+                        className={canvasControlButtonClass}
+                        title="Undo"
+                        aria-label="Undo"
+                      >
+                        <CornerDownLeft className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    {canRedo && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleRedo}
+                        disabled={isCanvasInteractionBlocked}
+                        className={canvasControlButtonClass}
+                        title="Redo"
+                        aria-label="Redo"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </>
+                ) : null,
+                (
+                  <>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -2606,10 +3092,12 @@ function PipelineEditor() {
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </Button>
-                </>
-              )}
-              triggerControlsRight={(
-                <>
+                  </>
+                ),
+              ]}
+              triggerControlGroupsRight={[
+                (
+                  <>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -2637,8 +3125,37 @@ function PipelineEditor() {
                   >
                     {isFlowInteractive ? <LockOpen className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                   </Button>
-                </>
-              )}
+                  </>
+                ),
+                activeSelectionIds.length > 0 ? (
+                  <>
+                    {!activeSelectionDuplicationIssue && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={duplicateActiveSelection}
+                        disabled={isCanvasInteractionBlocked}
+                        className={canvasControlButtonClass}
+                        title={activeSelectionIds.length > 1 ? 'Duplicate selection' : 'Duplicate'}
+                        aria-label={activeSelectionIds.length > 1 ? 'Duplicate selection' : 'Duplicate'}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeNodesByIds(activeSelectionIds)}
+                      disabled={isCanvasInteractionBlocked}
+                      className={canvasControlButtonClass}
+                      title={activeSelectionIds.length > 1 ? 'Delete selection' : 'Delete'}
+                      aria-label={activeSelectionIds.length > 1 ? 'Delete selection' : 'Delete'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    </Button>
+                  </>
+                ) : null,
+              ]}
               pipelineKey={id ?? 'new'}
               pipeline={{
                 name: pipelineName,
@@ -2666,8 +3183,10 @@ function PipelineEditor() {
                   edges={edges}
                   nodeId={selectedNode.id}
                   nodeType={selectedNode.data.type as NodeType}
-                  nodeLabel={selectedNode.data.label || 'Node'}
-                  config={selectedNode.data.config || {}}
+                  nodeLabel={typeof selectedNode.data.label === 'string' ? selectedNode.data.label : 'Node'}
+                  config={typeof selectedNode.data.config === 'object' && selectedNode.data.config !== null
+                    ? selectedNode.data.config as Record<string, unknown>
+                    : {}}
                   onUpdate={updateNodeConfig}
                   onLabelChange={updateNodeLabel}
                   onRemoveSourceHandles={removeSelectedNodeSourceHandles}
@@ -2708,7 +3227,7 @@ function PipelineEditor() {
       {activeNodeLog && activeNodeLogNode && (
         <NodeExecutionModal
           nodeId={activeNodeLogId!}
-          nodeLabel={activeNodeLogNode.data.label || activeNodeLogNode.id}
+          nodeLabel={typeof activeNodeLogNode.data.label === 'string' ? activeNodeLogNode.data.label : activeNodeLogNode.id}
           nodeType={activeNodeLogNode.data.type as NodeType}
           log={activeNodeLog}
           onClose={() => setActiveNodeLogId(null)}
@@ -2736,6 +3255,47 @@ function PipelineEditor() {
           onClose={() => setTemplateMenuPosition(null)}
         />
       )}
+
+      <Modal
+        open={showLeaveConfirmModal}
+        title="Unsaved changes"
+        description="This pipeline has unsaved changes. Save before leaving, or leave now and discard them."
+        onClose={() => {
+          if (!isSaving) {
+            handleCancelLeave()
+          }
+        }}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-text-muted">
+            Your unsaved node edits, connections, and pipeline details will be lost if you leave without saving.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={handleCancelLeave}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleSaveAndContinue()}
+              loading={isSaving}
+            >
+              <Save className="w-4 h-4" />
+              Save and continue
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleLeaveWithoutSaving}
+              disabled={isSaving}
+            >
+              Leave without saving
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={showSaveTemplateModal}

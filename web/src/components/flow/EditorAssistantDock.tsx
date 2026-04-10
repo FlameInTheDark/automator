@@ -52,8 +52,8 @@ type EditorAssistantDockProps = {
   onEditLockChange: (locked: boolean) => void
   panelPosition?: 'bottom-center' | 'bottom-left'
   panelClassName?: string
-  triggerControlsLeft?: ReactNode
-  triggerControlsRight?: ReactNode
+  triggerControlGroupsLeft?: ReactNode[]
+  triggerControlGroupsRight?: ReactNode[]
 }
 
 export default function EditorAssistantDock({
@@ -66,8 +66,8 @@ export default function EditorAssistantDock({
   onEditLockChange,
   panelPosition = 'bottom-center',
   panelClassName,
-  triggerControlsLeft,
-  triggerControlsRight,
+  triggerControlGroupsLeft,
+  triggerControlGroupsRight,
 }: EditorAssistantDockProps) {
   const { addToast } = useUIStore()
 
@@ -97,7 +97,9 @@ export default function EditorAssistantDock({
     Boolean(attachedLog)
   )
   const providerLabel = providers.find((provider) => provider.id === providerId)?.name ?? 'Choose model'
-  const hasTriggerControls = Boolean(triggerControlsLeft) || Boolean(triggerControlsRight)
+  const leftGroups = (triggerControlGroupsLeft ?? []).filter(Boolean)
+  const rightGroups = (triggerControlGroupsRight ?? []).filter(Boolean)
+  const hasTriggerControls = leftGroups.length > 0 || rightGroups.length > 0
 
   useEffect(() => {
     if (providerId || providers.length === 0) {
@@ -315,11 +317,15 @@ export default function EditorAssistantDock({
       )}
     >
       <div className={cn(
-        'flex w-[min(32rem,calc(100vw-1rem))] max-w-full flex-col gap-3 sm:w-[30rem]',
-        panelPosition === 'bottom-left' ? 'items-start' : 'items-center',
+        'flex w-[min(42rem,calc(100vw-1rem))] max-w-full flex-col gap-3',
       )}>
         {open && (
-          <div className="pointer-events-auto w-full origin-bottom overflow-hidden rounded-[28px] border border-border/80 bg-bg-elevated/95 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl animate-dock-in">
+          <div
+            className={cn(
+              'pointer-events-auto w-[min(32rem,calc(100vw-1rem))] max-w-full origin-bottom overflow-hidden rounded-[28px] border border-border/80 bg-bg-elevated/95 shadow-[0_24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl animate-dock-in',
+              panelPosition === 'bottom-left' ? 'self-start' : 'self-center',
+            )}
+          >
             <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-4">
               <div className="flex min-w-0 items-center gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-accent/20 bg-accent/10 text-accent">
@@ -511,36 +517,48 @@ export default function EditorAssistantDock({
         )}
 
         <div className={cn(
-          'pointer-events-auto flex max-w-full items-center gap-2',
+          'pointer-events-auto grid min-h-14 w-full max-w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2',
           panelPosition === 'bottom-left' ? 'self-start' : 'self-center',
         )}>
-          {triggerControlsLeft && (
-            <div className="flex items-center gap-1 rounded-2xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur">
-              {triggerControlsLeft}
-            </div>
-          )}
+          <div className="flex min-w-0 justify-end gap-2">
+            {leftGroups.map((group, index) => (
+              <div
+                key={`left-group-${index}`}
+                className="flex items-center gap-1 rounded-2xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur"
+              >
+                {group}
+              </div>
+            ))}
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setOpen((current) => !current)}
-            disabled={isSending}
-            className={cn(
-              'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-[transform,background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-70',
-              open
-                ? '-translate-y-0.5 scale-[1.03] border-accent/40 bg-accent text-white'
-                : 'border-border bg-bg-elevated/95 text-accent backdrop-blur hover:border-accent/30 hover:bg-bg-overlay',
-              hasTriggerControls && 'shadow-[0_18px_40px_rgba(0,0,0,0.32)]',
-            )}
-            aria-label={open ? 'Close AI assistant' : 'Open AI assistant'}
-          >
-            <Brain className="h-6 w-6" />
-          </button>
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => setOpen((current) => !current)}
+              disabled={isSending}
+              className={cn(
+                'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-[transform,background-color,border-color,color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-70',
+                open
+                  ? '-translate-y-0.5 scale-[1.03] border-accent/40 bg-accent text-white'
+                  : 'border-border bg-bg-elevated/95 text-accent backdrop-blur hover:border-accent/30 hover:bg-bg-overlay',
+                hasTriggerControls && 'shadow-[0_18px_40px_rgba(0,0,0,0.32)]',
+              )}
+              aria-label={open ? 'Close AI assistant' : 'Open AI assistant'}
+            >
+              <Brain className="h-6 w-6" />
+            </button>
+          </div>
 
-          {triggerControlsRight && (
-            <div className="flex items-center gap-1 rounded-2xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur">
-              {triggerControlsRight}
-            </div>
-          )}
+          <div className="flex min-w-0 justify-start gap-2">
+            {rightGroups.map((group, index) => (
+              <div
+                key={`right-group-${index}`}
+                className="flex items-center gap-1 rounded-2xl border border-border bg-bg-elevated/95 p-1 shadow-xl backdrop-blur"
+              >
+                {group}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </Panel>

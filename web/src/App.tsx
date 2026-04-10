@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AppLayout from './components/layout/AppLayout'
 import RequireAuth from './components/auth/RequireAuth'
@@ -21,26 +21,30 @@ const queryClient = new QueryClient({
   },
 })
 
+const router = createBrowserRouter(
+  createRoutesFromElements(
+    <>
+      <Route path="/login" element={<Login />} />
+      <Route path="/channels/connect" element={<ChannelConnect />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/pipelines" element={<Pipelines />} />
+          <Route path="/pipelines/:id" element={<PipelineEditor />} />
+          <Route path="/templates" element={<Templates />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/chat" element={<LLMChat />} />
+          <Route path="/chat/:conversationId" element={<LLMChat />} />
+        </Route>
+      </Route>
+    </>,
+  ),
+)
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/channels/connect" element={<ChannelConnect />} />
-          <Route element={<RequireAuth />}>
-            <Route element={<AppLayout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/pipelines" element={<Pipelines />} />
-              <Route path="/pipelines/:id" element={<PipelineEditor />} />
-              <Route path="/templates" element={<Templates />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/chat" element={<LLMChat />} />
-              <Route path="/chat/:conversationId" element={<LLMChat />} />
-            </Route>
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>
   )
 }

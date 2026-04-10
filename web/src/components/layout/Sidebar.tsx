@@ -23,13 +23,18 @@ export default function Sidebar() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const sessionQuery = useAuthSession()
-  const { sidebarCollapsed, toggleSidebar, addToast } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar, addToast, requestActiveLeaveConfirmation } = useUIStore()
   const username = sessionQuery.data?.username?.trim() ?? ''
   const displayName = username || 'Unknown user'
   const userInitial = displayName.charAt(0).toUpperCase() || '?'
 
   async function handleLogout() {
     try {
+      const canLeave = await requestActiveLeaveConfirmation()
+      if (!canLeave) {
+        return
+      }
+
       await api.auth.logout()
       queryClient.setQueryData<AuthSession | null>(AUTH_SESSION_QUERY_KEY, null)
       navigate('/login', { replace: true })
@@ -113,7 +118,7 @@ export default function Sidebar() {
           )
         )}
         <button
-          onClick={handleLogout}
+          onClick={() => void handleLogout()}
           title={sidebarCollapsed ? 'Sign out' : undefined}
           className="flex w-full items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-sm text-text-muted transition-colors hover:bg-bg-overlay hover:text-text"
         >
