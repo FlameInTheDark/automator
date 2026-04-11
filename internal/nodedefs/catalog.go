@@ -80,8 +80,24 @@ func BuiltinDefinitions() []Definition {
 
 		builtin("logic:condition", "logic", "Condition", "Evaluate a condition (if/else)", "git-branch", colorLogic, map[string]any{"expression": ""}),
 		builtin("logic:switch", "logic", "Switch", "Evaluate multiple conditions and fan out to every matching branch", "split", colorLogic, map[string]any{"conditions": []any{map[string]any{"id": "condition-1", "label": "Condition 1", "expression": ""}}}),
-		builtin("logic:merge", "logic", "Merge", "Merge multiple upstream object outputs into one payload", "workflow", colorLogic, map[string]any{"mode": "shallow"}),
-		builtin("logic:aggregate", "logic", "Aggregate", "Collect multiple upstream outputs into ordered arrays with source metadata and optional output id overrides", "list", colorLogic, map[string]any{"idOverrides": map[string]any{}}),
+		builtinWithOptions("logic:merge", "logic", "Merge", "Merge multiple upstream object outputs into one payload", "workflow", colorLogic, map[string]any{"mode": "shallow"}, builtinOptions{
+			menuPath: []string{"Data Transformation", "Combine"},
+		}),
+		builtinWithOptions("logic:aggregate", "logic", "Aggregate", "Collect multiple upstream outputs into ordered arrays with source metadata and optional output id overrides", "list", colorLogic, map[string]any{"idOverrides": map[string]any{}}, builtinOptions{
+			menuPath: []string{"Data Transformation", "Combine"},
+		}),
+		builtinWithOptions("logic:sort", "logic", "Sort", "Sort an array from the current payload and write it back to a target path", "arrow-up-down", colorLogic, map[string]any{"inputPath": "items", "outputPath": "items", "fieldPath": "", "direction": "asc", "valueType": "auto"}, builtinOptions{
+			menuPath: []string{"Data Transformation", "List Operations"},
+		}),
+		builtinWithOptions("logic:limit", "logic", "Limit", "Trim an array in the current payload to a maximum number of items", "list-end", colorLogic, map[string]any{"inputPath": "items", "outputPath": "items", "maxItems": 10}, builtinOptions{
+			menuPath: []string{"Data Transformation", "List Operations"},
+		}),
+		builtinWithOptions("logic:remove_duplicates", "logic", "Remove Duplicates", "Remove duplicate items from an array using whole-item or field-based comparison", "copy-x", colorLogic, map[string]any{"inputPath": "items", "outputPath": "items", "strategy": "whole_item", "fieldPath": "", "keep": "first"}, builtinOptions{
+			menuPath: []string{"Data Transformation", "List Operations"},
+		}),
+		builtinWithOptions("logic:summarize", "logic", "Summarize", "Calculate summary metrics for an array and write the result to a summary path", "calculator", colorLogic, map[string]any{"inputPath": "items", "outputPath": "summary", "groupByPath": "", "metrics": []any{map[string]any{"name": "total", "op": "count", "fieldPath": ""}}}, builtinOptions{
+			menuPath: []string{"Data Transformation", "Analytics"},
+		}),
 		builtin("logic:return", "logic", "Return", "Return data from this pipeline to the caller and stop execution", "corner-down-left", colorLogic, map[string]any{"value": ""}),
 
 		builtin("llm:prompt", "llm", "LLM Prompt", "Send a prompt to an LLM provider", "brain", colorLLM, map[string]any{"providerId": "", "prompt": "", "model": "", "temperature": 0.7, "max_tokens": 1024}),
@@ -92,6 +108,15 @@ func BuiltinDefinitions() []Definition {
 }
 
 func builtin(nodeType string, category string, label string, description string, icon string, color string, defaultConfig map[string]any) Definition {
+	return builtinWithOptions(nodeType, category, label, description, icon, color, defaultConfig, builtinOptions{})
+}
+
+type builtinOptions struct {
+	menuPath    []string
+	outputHints []pluginapi.OutputHint
+}
+
+func builtinWithOptions(nodeType string, category string, label string, description string, icon string, color string, defaultConfig map[string]any, options builtinOptions) Definition {
 	return Definition{
 		Type:          nodeType,
 		Category:      category,
@@ -100,11 +125,11 @@ func builtin(nodeType string, category string, label string, description string,
 		Description:   description,
 		Icon:          icon,
 		Color:         color,
-		MenuPath:      defaultMenuPathForDefinition(nodeType, category, nil),
+		MenuPath:      defaultMenuPathForDefinition(nodeType, category, options.menuPath),
 		DefaultConfig: defaultConfig,
 		Fields:        nil,
 		Outputs:       nil,
-		OutputHints:   nil,
+		OutputHints:   append([]pluginapi.OutputHint(nil), options.outputHints...),
 	}
 }
 

@@ -139,6 +139,10 @@ Logic:
 - `logic:switch`
 - `logic:merge`
 - `logic:aggregate`
+- `logic:sort`
+- `logic:limit`
+- `logic:remove_duplicates`
+- `logic:summarize`
 - `logic:return`
 
 LLM:
@@ -433,6 +437,10 @@ Template syntax is for text/config fields:
 - `{{input}}`
 - `{{input.nodes}}`
 - `{{input.nodes[0].status}}`
+- `{{secret.api_token}}`
+- `{{$('action-http-1').response.status_code}}`
+
+Cross-node selectors only resolve after the referenced node has already executed in the current run. Missing paths or unavailable node IDs fail template rendering.
 
 Expression syntax is for `logic:condition` and `logic:switch` expressions:
 
@@ -456,6 +464,7 @@ When updating an existing pipeline:
 
 - Start with one clear trigger
 - Add one action at a time
+- Prefer built-in transform nodes over `action:lua` when sort, limit, dedupe, or summary nodes already match the need
 - Use `logic:return` for structured outputs
 - Prefer clear labels
 - Use readable IDs such as `trigger-manual-1`, `action-http-1`, `logic-return-1`
@@ -565,6 +574,11 @@ Use:
 - `logic:switch` for multiple named branches
 - `logic:merge` when you want to merge upstream objects
 - `logic:aggregate` when you want collected upstream arrays and metadata
+- `logic:sort` when you need deterministic ordering of an array already in the payload
+- `logic:limit` when you only need the first N items from a list
+- `logic:remove_duplicates` when repeated entries should collapse before later steps
+- `logic:summarize` when downstream steps need aggregate metrics instead of raw rows
+- `action:lua` when the transformation is too custom for the built-in logic nodes
 - `logic:return` when the pipeline is used as a callable unit
 
 ## When Unsure

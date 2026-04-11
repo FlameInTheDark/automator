@@ -124,7 +124,7 @@ func (r kubernetesOperationRunner) Execute(ctx context.Context, config json.RawM
 	if err != nil {
 		return nil, err
 	}
-	if err := renderKubernetesNodeConfig(&cfg, input); err != nil {
+	if err := renderKubernetesNodeConfig(ctx, &cfg, input); err != nil {
 		return nil, err
 	}
 
@@ -183,7 +183,7 @@ func (r kubernetesOperationRunner) ExecuteTool(ctx context.Context, config json.
 	if err := applyKubernetesToolArgs(&cfg, payload); err != nil {
 		return nil, err
 	}
-	if err := renderKubernetesNodeConfig(&cfg, input); err != nil {
+	if err := renderKubernetesNodeConfig(ctx, &cfg, input); err != nil {
 		return nil, err
 	}
 
@@ -608,11 +608,11 @@ func parseKubernetesNodeConfig(config json.RawMessage) (kubernetesNodeConfig, er
 	return cfg, nil
 }
 
-func renderKubernetesNodeConfig(cfg *kubernetesNodeConfig, input map[string]any) error {
+func renderKubernetesNodeConfig(ctx context.Context, cfg *kubernetesNodeConfig, input map[string]any) error {
 	if cfg == nil {
 		return nil
 	}
-	if err := templating.RenderStrings(cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, cfg, input); err != nil {
 		return fmt.Errorf("render config: %w", err)
 	}
 	cfg.Command = normalizeCommandSlice(cfg.Command)

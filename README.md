@@ -10,7 +10,9 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 
 - [Documentation Index](docs/README.md)
 - [Node Reference](docs/nodes/README.md)
+- [Template Guide](docs/templates/README.md)
 - [Expression Guide](docs/expressions/README.md)
+- [Settings Guide](docs/settings/README.md)
 - [Plugin Authoring Guide](docs/plugins/README.md)
 
 ## Highlights
@@ -20,7 +22,9 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 - Built-in chat workspace for working directly with your configured LLM providers
 - Infrastructure automation for Proxmox and Kubernetes
 - Built-in HTTP, shell command, Lua, channel, and sub-pipeline execution nodes
+- n8n-inspired data transformation nodes for sorting, limiting, deduplicating, and summarizing arrays in-place
 - LLM prompt and agent nodes with connected tool nodes
+- Cross-node templates with `{{$('node-id').path}}` lookups alongside `input` and `secret`
 - Workspace skill loading from the nearest `.agents/skills`, with optional override support
 - Reusable templates with JSON import/export
 - Live execution tracking over websocket
@@ -33,6 +37,8 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 - Start, stop, clone, and inspect Proxmox workloads
 - Inspect, patch, apply, restart, scale, and troubleshoot Kubernetes resources
 - Call external APIs, run local shell commands, and execute Lua scripts
+- Use bundled Lua helper modules for strings, templates, URLs, regex, HTTP, and HTML scraping
+- Sort, limit, deduplicate, and summarize list data without leaving the built-in node set
 - Chain pipelines together and return structured data between them
 - Give LLM agents access to infrastructure, shell, HTTP, channel, and pipeline tools
 - Chat with your configured LLM providers in the built-in chat workspace
@@ -68,6 +74,10 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 - Switch
 - Merge
 - Aggregate
+- Sort
+- Limit
+- Remove Duplicates
+- Summarize
 - Return
 
 ### LLM
@@ -93,7 +103,7 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 - Persistent browser conversations with your configured LLM providers
 - Stop in-flight responses when you want to interrupt generation
 - Local workspace skills are summarized into chat context and can be loaded on demand through the built-in `get_skill` tool
-- Shared base instructions and built-in knowledge modules are configurable in `Settings -> AI -> Assistants -> Chat Window`
+- Shared base instructions and built-in knowledge modules are configurable in `Settings -> AI -> Assistants`
 
 ### Node Editor Assistant
 
@@ -102,7 +112,7 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 - `Edit` mode can propose and apply validated live graph operations directly to the in-memory canvas
 - Live edits stay in the UI until the user saves the pipeline
 - During `Edit` requests, the canvas is temporarily locked from manual changes while the assistant remains interactive
-- Shared base instructions and built-in graph knowledge modules are configurable in `Settings -> AI -> Assistants -> Node Editor`
+- Shared base instructions and built-in graph knowledge modules are configurable in `Settings -> AI -> Assistants`
 
 ## Quick Start
 
@@ -128,7 +138,7 @@ Default login credentials for a fresh database:
 - Username: `admin`
 - Password: `admin`
 
-Change the default password after the first login in `Settings -> Users`.
+Change the default password after the first login in `Settings -> Security -> Users`.
 
 ## Docker
 

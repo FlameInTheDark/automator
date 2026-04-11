@@ -56,7 +56,7 @@ func (e *RunPipelineAction) Execute(ctx context.Context, config json.RawMessage,
 		return nil, fmt.Errorf("pipeline runner is not configured")
 	}
 
-	cfg, err := parseRunPipelineConfig(config, input)
+	cfg, err := parseRunPipelineConfig(ctx, config, input)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (e *GetPipelineAction) loadPipelineOutput(ctx context.Context, config json.
 		return nil, fmt.Errorf("pipeline store is not configured")
 	}
 
-	cfg, err := parseGetPipelineConfig(config, input)
+	cfg, err := parseGetPipelineConfig(ctx, config, input)
 	if err != nil {
 		return nil, err
 	}
@@ -443,12 +443,12 @@ func (e *PipelineRunToolNode) ExecuteTool(ctx context.Context, config json.RawMe
 	return buildRunPipelineOutput(result), nil
 }
 
-func parseRunPipelineConfig(config json.RawMessage, input map[string]any) (runPipelineConfig, error) {
+func parseRunPipelineConfig(ctx context.Context, config json.RawMessage, input map[string]any) (runPipelineConfig, error) {
 	var cfg runPipelineConfig
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return runPipelineConfig{}, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return runPipelineConfig{}, fmt.Errorf("render config: %w", err)
 	}
 	if strings.TrimSpace(cfg.PipelineID) == "" {
@@ -473,12 +473,12 @@ func parseRunPipelineToolConfig(config json.RawMessage) (runPipelineConfig, erro
 	return cfg, nil
 }
 
-func parseGetPipelineConfig(config json.RawMessage, input map[string]any) (getPipelineConfig, error) {
+func parseGetPipelineConfig(ctx context.Context, config json.RawMessage, input map[string]any) (getPipelineConfig, error) {
 	cfg, err := parseGetPipelineToolConfig(config)
 	if err != nil {
 		return getPipelineConfig{}, err
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return getPipelineConfig{}, fmt.Errorf("render config: %w", err)
 	}
 	if strings.TrimSpace(cfg.PipelineID) == "" {

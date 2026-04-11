@@ -154,6 +154,38 @@ func TestBuiltinDefinitionsApplyDefaultMenuPaths(t *testing.T) {
 	}
 }
 
+func TestBuiltinDefinitionsIncludeDataTransformationMenuGroups(t *testing.T) {
+	t.Parallel()
+
+	definitions := BuiltinDefinitions()
+	byType := make(map[string]Definition, len(definitions))
+	for _, definition := range definitions {
+		byType[definition.Type] = definition
+	}
+
+	expectPath := func(nodeType string, want []string) {
+		t.Helper()
+
+		got := byType[nodeType].MenuPath
+		if len(got) != len(want) {
+			t.Fatalf("%s menu path = %#v, want %#v", nodeType, got, want)
+		}
+		for index := range want {
+			if got[index] != want[index] {
+				t.Fatalf("%s menu path = %#v, want %#v", nodeType, got, want)
+			}
+		}
+	}
+
+	expectPath("action:lua", []string{"General"})
+	expectPath("logic:merge", []string{"Data Transformation", "Combine"})
+	expectPath("logic:aggregate", []string{"Data Transformation", "Combine"})
+	expectPath("logic:sort", []string{"Data Transformation", "List Operations"})
+	expectPath("logic:limit", []string{"Data Transformation", "List Operations"})
+	expectPath("logic:remove_duplicates", []string{"Data Transformation", "List Operations"})
+	expectPath("logic:summarize", []string{"Data Transformation", "Analytics"})
+}
+
 func TestPluginDefinitionFromBindingUsesConfiguredMenuPath(t *testing.T) {
 	t.Parallel()
 

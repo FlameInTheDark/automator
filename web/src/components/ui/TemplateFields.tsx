@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Braces, Search } from 'lucide-react'
 import Input from './Input'
@@ -116,6 +116,21 @@ export function TemplateInsertButton({ suggestions, onInsert }: TemplateInsertBu
   const hasSampleSuggestions = suggestions.some((suggestion) => suggestion.kind === 'sample')
   const templateSuggestions = filteredSuggestions.filter((suggestion) => suggestion.kind !== 'sample')
   const sampleSuggestions = filteredSuggestions.filter((suggestion) => suggestion.kind === 'sample')
+  const templateSuggestionGroups = useMemo(() => {
+    const groups = new Map<string, TemplateSuggestion[]>()
+
+    templateSuggestions.forEach((suggestion) => {
+      const groupLabel = suggestion.group ?? 'Templates'
+      const existing = groups.get(groupLabel)
+      if (existing) {
+        existing.push(suggestion)
+        return
+      }
+      groups.set(groupLabel, [suggestion])
+    })
+
+    return Array.from(groups.entries()).map(([label, items]) => ({ label, items }))
+  }, [templateSuggestions])
 
   if (suggestions.length === 0) {
     return null
@@ -153,23 +168,42 @@ export function TemplateInsertButton({ suggestions, onInsert }: TemplateInsertBu
                     Templates
                   </div>
                 )}
-                {templateSuggestions.map((suggestion) => (
-                  <button
-                    key={suggestion.expression}
-                    type="button"
-                    onClick={() => {
-                      onInsert(suggestion.template)
-                      setIsOpen(false)
-                      setQuery('')
-                    }}
-                    className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-bg-overlay"
-                  >
-                    <div className="text-xs font-medium text-text">{suggestion.label}</div>
-                    <div className="mt-1 font-mono text-[11px] text-accent">{suggestion.template}</div>
-                    {suggestion.description && (
-                      <div className="mt-1 text-[11px] text-text-dimmed">{suggestion.description}</div>
+                {templateSuggestionGroups.map((group, groupIndex) => (
+                  <div key={group.label} className="space-y-1">
+                    {(templateSuggestionGroups.length > 1 || hasSampleSuggestions) && (
+                      <div className={cn(
+                        'px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-dimmed',
+                        groupIndex === 0 && hasSampleSuggestions ? 'pb-1 pt-1' : groupIndex === 0 ? 'pb-1' : 'pb-1 pt-3',
+                      )}>
+                        {group.label}
+                      </div>
                     )}
-                  </button>
+                    {group.items.map((suggestion) => (
+                      <button
+                        key={suggestion.expression}
+                        type="button"
+                        onClick={() => {
+                          onInsert(suggestion.template)
+                          setIsOpen(false)
+                          setQuery('')
+                        }}
+                        className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-bg-overlay"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs font-medium text-text">{suggestion.label}</div>
+                          {suggestion.badge && (
+                            <span className="rounded-full border border-border bg-bg-overlay px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-text-dimmed">
+                              {suggestion.badge}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 font-mono text-[11px] text-accent">{suggestion.template}</div>
+                        {suggestion.description && (
+                          <div className="mt-1 text-[11px] text-text-dimmed">{suggestion.description}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}
@@ -269,43 +303,113 @@ function insertTemplateValue(
 
 const templateTokenPattern = /\{\{[\s\S]*?\}\}/g
 
-function renderHighlightedTemplateText(value: string) {
+interface TemplateTextSegment {
+  type: 'text' | 'token'
+  value: string
+  start: number
+}
+
+const templateHighlightStyle: React.CSSProperties = {
+  padding: 0,
+  margin: 0,
+  border: 0,
+  font: 'inherit',
+  letterSpacing: 'inherit',
+  verticalAlign: 'baseline',
+  boxShadow: 'inset 0 0 0 1px rgba(251, 191, 36, 0.35)',
+}
+
+const mirroredOverlayContentCssProperties = [
+  'direction',
+  'font',
+  'font-family',
+  'font-feature-settings',
+  'font-kerning',
+  'font-size',
+  'font-style',
+  'font-variant-ligatures',
+  'font-variation-settings',
+  'font-weight',
+  'letter-spacing',
+  'line-height',
+  'padding-top',
+  'padding-right',
+  'padding-bottom',
+  'padding-left',
+  'tab-size',
+  'text-align',
+  'text-indent',
+  'text-transform',
+  'white-space',
+  'word-break',
+  'overflow-wrap',
+  'word-spacing',
+] as const
+
+function tokenizeTemplateText(value: string): TemplateTextSegment[] {
   if (!value) {
-    return null
+    return []
   }
 
-  const parts: React.ReactNode[] = []
+  const segments: TemplateTextSegment[] = []
   let lastIndex = 0
 
   value.replace(templateTokenPattern, (match, offset) => {
     if (offset > lastIndex) {
-      parts.push(
-        <Fragment key={`text-${lastIndex}`}>
-          {value.slice(lastIndex, offset)}
-        </Fragment>
-      )
+      segments.push({
+        type: 'text',
+        value: value.slice(lastIndex, offset),
+        start: lastIndex,
+      })
     }
 
-    parts.push(
-      <span
-        key={`token-${offset}`}
-        className="rounded bg-amber-400/15 px-0.5 text-amber-300 ring-1 ring-amber-400/25"
-      >
-        {match}
-      </span>
-    )
+    segments.push({
+      type: 'token',
+      value: match,
+      start: offset,
+    })
 
     lastIndex = offset + match.length
     return match
   })
 
   if (lastIndex < value.length) {
-    parts.push(
-      <Fragment key={`text-${lastIndex}`}>
-        {value.slice(lastIndex)}
-      </Fragment>
-    )
+    segments.push({
+      type: 'text',
+      value: value.slice(lastIndex),
+      start: lastIndex,
+    })
   }
+
+  return segments
+}
+
+function renderHighlightedTemplateText(value: string) {
+  if (!value) {
+    return null
+  }
+
+  const parts = tokenizeTemplateText(value).map((segment) => {
+    if (segment.type === 'text') {
+      return (
+        <Fragment key={`text-${segment.start}`}>
+          {segment.value}
+        </Fragment>
+      )
+    }
+
+    return (
+      <mark
+        key={`token-${segment.start}`}
+        className="rounded-[4px] bg-amber-400/15 text-amber-200"
+        style={templateHighlightStyle}
+      >
+        {segment.value}
+      </mark>
+    )
+  })
+
+  parts.push(<wbr key="sentinel" />)
 
   return parts
 }
@@ -320,6 +424,26 @@ function syncOverlayScroll(
 
   overlay.scrollTop = source.scrollTop
   overlay.scrollLeft = source.scrollLeft
+}
+
+function syncOverlayMetrics(
+  source: HTMLInputElement | HTMLTextAreaElement | null,
+  overlay: HTMLDivElement | null,
+  overlayContent: HTMLDivElement | null,
+) {
+  if (!source || !overlay || !overlayContent || typeof window === 'undefined') {
+    return
+  }
+
+  const computed = window.getComputedStyle(source)
+
+  for (const property of mirroredOverlayContentCssProperties) {
+    overlayContent.style.setProperty(property, computed.getPropertyValue(property))
+  }
+
+  overlay.style.boxSizing = 'border-box'
+  overlay.style.width = `${source.clientWidth}px`
+  overlay.style.height = `${source.clientHeight}px`
 }
 
 function buildEditorMirrorStyle(style?: React.CSSProperties): React.CSSProperties | undefined {
@@ -346,11 +470,29 @@ interface TemplateInputProps extends React.InputHTMLAttributes<HTMLInputElement>
 export function TemplateInput({ className, suggestions = [], value, ...props }: TemplateInputProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
+  const overlayContentRef = useRef<HTMLDivElement>(null)
   const stringValue = typeof value === 'string' ? value : value?.toString() ?? ''
+  const syncOverlay = useCallback(() => {
+    syncOverlayMetrics(inputRef.current, overlayRef.current, overlayContentRef.current)
+    syncOverlayScroll(inputRef.current, overlayRef.current)
+  }, [])
+
+  useLayoutEffect(() => {
+    syncOverlay()
+  }, [syncOverlay, stringValue, className, props.style])
 
   useEffect(() => {
-    syncOverlayScroll(inputRef.current, overlayRef.current)
-  }, [stringValue])
+    const source = inputRef.current
+    if (!source || typeof ResizeObserver === 'undefined') {
+      return undefined
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncOverlay()
+    })
+    observer.observe(source)
+    return () => observer.disconnect()
+  }, [syncOverlay])
 
   return (
     <div className="space-y-1.5">
@@ -364,9 +506,9 @@ export function TemplateInput({ className, suggestions = [], value, ...props }: 
           <div
             ref={overlayRef}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-2 text-text"
+            className="pointer-events-none absolute left-0 top-0 overflow-hidden text-text"
           >
-            <div className={cn('whitespace-pre text-sm', className)}>
+            <div ref={overlayContentRef} className={cn('whitespace-pre', className)}>
               {renderHighlightedTemplateText(stringValue)}
             </div>
           </div>
@@ -404,11 +546,29 @@ interface TemplateTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAre
 export function TemplateTextarea({ className, suggestions = [], value, ...props }: TemplateTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
+  const overlayContentRef = useRef<HTMLDivElement>(null)
   const stringValue = typeof value === 'string' ? value : value?.toString() ?? ''
+  const syncOverlay = useCallback(() => {
+    syncOverlayMetrics(textareaRef.current, overlayRef.current, overlayContentRef.current)
+    syncOverlayScroll(textareaRef.current, overlayRef.current)
+  }, [])
+
+  useLayoutEffect(() => {
+    syncOverlay()
+  }, [syncOverlay, stringValue, className, props.style, props.rows])
 
   useEffect(() => {
-    syncOverlayScroll(textareaRef.current, overlayRef.current)
-  }, [stringValue])
+    const source = textareaRef.current
+    if (!source || typeof ResizeObserver === 'undefined') {
+      return undefined
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncOverlay()
+    })
+    observer.observe(source)
+    return () => observer.disconnect()
+  }, [syncOverlay])
 
   return (
     <div className="space-y-1.5">
@@ -422,9 +582,12 @@ export function TemplateTextarea({ className, suggestions = [], value, ...props 
           <div
             ref={overlayRef}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-2 text-text"
+            className="pointer-events-none absolute left-0 top-0 overflow-hidden text-text"
           >
-            <div className={cn('min-h-full whitespace-pre-wrap break-words text-sm', className)}>
+            <div
+              ref={overlayContentRef}
+              className={cn('min-h-full whitespace-pre-wrap break-words', className)}
+            >
               {renderHighlightedTemplateText(stringValue)}
             </div>
           </div>
@@ -434,7 +597,7 @@ export function TemplateTextarea({ className, suggestions = [], value, ...props 
           {...props}
           value={value}
           className={cn(
-            'relative z-10 border-0 bg-transparent leading-5 shadow-none focus:border-0 focus:ring-0',
+            'relative z-10 border-0 bg-transparent whitespace-pre-wrap break-words leading-5 shadow-none focus:border-0 focus:ring-0',
             stringValue && 'selection:bg-accent/30',
             className,
           )}

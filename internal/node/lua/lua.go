@@ -24,12 +24,14 @@ func (e *LuaNode) Execute(ctx context.Context, config json.RawMessage, input map
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
 	L := lua.NewState()
 	defer L.Close()
+	L.SetContext(ctx)
+	preloadModules(L)
 
 	L.SetGlobal("input", toLuaValue(L, input))
 	for key, value := range input {

@@ -1366,6 +1366,7 @@ export default function NodeConfigPanel({
                       <p>Prefer <span className="font-mono text-slate-200">input.field</span> when reading values so the data source stays explicit.</p>
                       <p>Lua arrays are 1-based, so the first item is <span className="font-mono text-slate-200">input.items[1]</span>.</p>
                       <p>Return a table for structured output. Returning a primitive becomes <span className="font-mono text-slate-200">result</span> downstream.</p>
+                      <p>Built-in helpers are available through <span className="font-mono text-slate-200">require()</span>: <span className="font-mono text-slate-200">strings</span>, <span className="font-mono text-slate-200">template</span>, <span className="font-mono text-slate-200">url</span>, <span className="font-mono text-slate-200">re</span>, <span className="font-mono text-slate-200">http</span>, and <span className="font-mono text-slate-200">scrape</span>.</p>
                     </>
                   )}
                 >
@@ -1380,9 +1381,9 @@ export default function NodeConfigPanel({
                   <p className="mt-1 text-xs text-text-dimmed">
                     {(((localConfig.script as string) || '').split(/\r?\n/).filter(Boolean).length || 0)} lines saved
                   </p>
-                  <div className="mt-3 rounded-md border border-border/70 bg-bg-overlay/70 px-2.5 py-2 text-xs text-text-dimmed">
-                    Read runtime data from <span className="font-mono text-text">input</span>, prefer <span className="font-mono text-text">input.field</span> over implicit globals, remember Lua arrays are 1-based, and return a table when you want named output fields.
-                  </div>
+                    <div className="mt-3 rounded-md border border-border/70 bg-bg-overlay/70 px-2.5 py-2 text-xs text-text-dimmed">
+                      Read runtime data from <span className="font-mono text-text">input</span>, prefer <span className="font-mono text-text">input.field</span> over implicit globals, remember Lua arrays are 1-based, return a table when you want named output fields, and load built-ins with <span className="font-mono text-text">require()</span>: <span className="font-mono text-text">strings</span>, <span className="font-mono text-text">template</span>, <span className="font-mono text-text">url</span>, <span className="font-mono text-text">re</span>, <span className="font-mono text-text">http</span>, and <span className="font-mono text-text">scrape</span>.
+                    </div>
                 </div>
                 <div className="flex justify-end">
                   <Button variant="secondary" onClick={() => setIsLuaEditorOpen(true)}>

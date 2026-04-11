@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/FlameInTheDark/emerald/internal/node"
 	"github.com/FlameInTheDark/emerald/internal/node/logic"
 	"github.com/FlameInTheDark/emerald/internal/pipeline"
+	"github.com/FlameInTheDark/emerald/internal/templating"
 )
 
 type testExecutor struct {
@@ -41,6 +43,35 @@ func (e *failingExecutor) Execute(ctx context.Context, config json.RawMessage, i
 }
 
 func (e *failingExecutor) Validate(config json.RawMessage) error {
+	return nil
+}
+
+type templateExecutor struct{}
+
+func (e *templateExecutor) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	var cfg struct {
+		Template string `json:"template"`
+	}
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return nil, err
+	}
+
+	rendered, err := templating.RenderStringWithContext(ctx, cfg.Template, input)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := json.Marshal(map[string]any{
+		"rendered": rendered,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &node.NodeResult{Output: data}, nil
+}
+
+func (e *templateExecutor) Validate(config json.RawMessage) error {
 	return nil
 }
 
@@ -342,6 +373,86 @@ func TestEngine_Execute_DataFlow(t *testing.T) {
 	}
 	if output["input_name"] != "test" {
 		t.Errorf("consumer input_name = %v, want 'test'", output["input_name"])
+	}
+}
+
+func TestEngine_Execute_AllowsTemplatesToReferenceCompletedNodeOutputsByID(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:producer", &testExecutor{output: map[string]any{
+		"response": map[string]any{
+			"status_code": 202,
+		},
+	}})
+	registry.Register("test:template", &templateExecutor{})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{ID: "producer", Type: "test:producer"},
+			{
+				ID:   "consumer",
+				Type: "test:template",
+				Data: json.RawMessage(`{"config":{"template":"Code {{$('producer').response.status_code}} / Input {{input.response.status_code}}"}}`),
+			},
+		},
+		Edges: []pipeline.FlowEdge{
+			{ID: "e1", Source: "producer", Target: "consumer"},
+		},
+	}
+
+	state, err := engine.Execute(context.Background(), flowData, "manual")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	consumerResult := state.NodeResults["consumer"]
+	if consumerResult == nil {
+		t.Fatal("expected consumer result")
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal(consumerResult.Output, &output); err != nil {
+		t.Fatalf("unmarshal consumer output: %v", err)
+	}
+
+	if output["rendered"] != "Code 202 / Input 202" {
+		t.Fatalf("rendered = %#v, want %q", output["rendered"], "Code 202 / Input 202")
+	}
+}
+
+func TestEngine_Execute_FailsWhenTemplateReferencesNodeThatHasNotRunYet(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:template", &templateExecutor{})
+	registry.Register("test:producer", &testExecutor{output: map[string]any{"value": 42}})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{
+				ID:   "consumer",
+				Type: "test:template",
+				Data: json.RawMessage(`{"config":{"template":"Late {{$('late').value}}"}}`),
+			},
+			{ID: "late", Type: "test:producer"},
+		},
+		Edges: []pipeline.FlowEdge{
+			{ID: "e1", Source: "consumer", Target: "late"},
+		},
+	}
+
+	state, err := engine.Execute(context.Background(), flowData, "manual")
+	if err == nil {
+		t.Fatal("expected template lookup to fail when referenced node has not run yet")
+	}
+	if !strings.Contains(err.Error(), `node "late" has not executed in this run`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := state.NodeResults["consumer"]
+	if result == nil || result.Error == nil {
+		t.Fatalf("expected consumer failure to be recorded, got %#v", result)
 	}
 }
 

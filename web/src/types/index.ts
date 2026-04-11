@@ -492,6 +492,7 @@ export interface TemplateSuggestion {
   kind?: 'template' | 'sample'
   preview?: string
   badge?: string
+  group?: string
 }
 
 export type NodeType = string

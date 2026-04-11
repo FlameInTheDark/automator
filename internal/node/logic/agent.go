@@ -38,7 +38,7 @@ func (e *LLMAgentNode) Execute(ctx context.Context, config json.RawMessage, inpu
 		renderInput["skills"] = e.Skills.SummaryText()
 	}
 
-	if err := templating.RenderStrings(&cfg, renderInput); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, renderInput); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 

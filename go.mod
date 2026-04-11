@@ -23,10 +23,15 @@ require (
 require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
+	github.com/chai2010/glua-helper v0.0.0-20171228064744-0e9a290dbcdf // indirect
+	github.com/chai2010/glua-strings v0.0.0-20250207180437-ffacd86c1693 // indirect
+	github.com/cjoudrey/gluahttp v0.0.0-20201111170219-25003d9adfa9 // indirect
+	github.com/cjoudrey/gluaurl v0.0.0-20161028222611-31cbb9bef199 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/fasthttp/websocket v1.5.8 // indirect
 	github.com/fatih/color v1.13.0 // indirect
+	github.com/felipejfc/gluahttpscrape v0.0.0-20170525191632-10580c4a38f9 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -43,6 +48,7 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
+	github.com/kohkimakimoto/gluatemplate v0.0.0-20160815033744-d9e2c9d6b00f // indirect
 	github.com/lann/builder v0.0.0-20180802200727-47ae307949d0 // indirect
 	github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -67,6 +73,8 @@ require (
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
+	github.com/yhat/scrape v0.0.0-20161128144610-24b7890b0945 // indirect
+	github.com/yuin/gluare v0.0.0-20170607022532-d7c94f1a80ed // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
@@ -87,6 +95,7 @@ require (
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b // indirect
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
+	layeh.com/gopher-luar v1.0.11 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/kustomize/api v0.20.1 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.20.1 // indirect

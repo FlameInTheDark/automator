@@ -104,7 +104,7 @@ func (e *ListNodesAction) Execute(ctx context.Context, config json.RawMessage, i
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -153,7 +153,7 @@ func (e *ListVMsCTsAction) Execute(ctx context.Context, config json.RawMessage, 
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -241,7 +241,7 @@ func (e *VMStartAction) Execute(ctx context.Context, config json.RawMessage, inp
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -306,7 +306,7 @@ func (e *VMStopAction) Execute(ctx context.Context, config json.RawMessage, inpu
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -379,7 +379,7 @@ func (e *VMCloneAction) Execute(ctx context.Context, config json.RawMessage, inp
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -467,7 +467,7 @@ func (e *HTTPAction) Execute(ctx context.Context, config json.RawMessage, input 
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -562,7 +562,7 @@ func (e *ChannelSendAction) Execute(ctx context.Context, config json.RawMessage,
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -656,7 +656,7 @@ func (e *ChannelReplyAction) Execute(ctx context.Context, config json.RawMessage
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -732,7 +732,7 @@ func (e *ChannelEditAction) Execute(ctx context.Context, config json.RawMessage,
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -807,7 +807,7 @@ func (e *ChannelSendAndWaitAction) Execute(ctx context.Context, config json.RawM
 		return nil, fmt.Errorf("channel wait sender is not configured")
 	}
 
-	cfg, err := parseChannelSendAndWaitConfig(config, input)
+	cfg, err := parseChannelSendAndWaitConfig(ctx, config, input)
 	if err != nil {
 		return nil, err
 	}
@@ -878,12 +878,12 @@ func (e *ChannelSendAndWaitAction) Validate(config json.RawMessage) error {
 	return nil
 }
 
-func parseChannelSendAndWaitConfig(config json.RawMessage, input map[string]any) (channelSendAndWaitConfig, error) {
+func parseChannelSendAndWaitConfig(ctx context.Context, config json.RawMessage, input map[string]any) (channelSendAndWaitConfig, error) {
 	var cfg channelSendAndWaitConfig
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return channelSendAndWaitConfig{}, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return channelSendAndWaitConfig{}, fmt.Errorf("render config: %w", err)
 	}
 

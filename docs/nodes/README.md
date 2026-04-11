@@ -15,12 +15,14 @@ Emerald pipelines are built from typed nodes. Every executable node receives a r
 
 - In templates, `input` means the whole current payload for the node.
 - Top-level payload keys are also exposed directly, so `{{status_code}}` and `{{input.status_code}}` can both work when that key exists.
+- Templates can also read a specific earlier node output with `{{$('node-id').path}}` after that node has already executed in the current run.
 - Logic nodes often wrap upstream data instead of passing it through unchanged.
 
 Example:
 
 - If an HTTP node outputs `response`, then a directly connected prompt node can read `{{input.response}}`.
 - If you insert `logic:switch` between them, the switch stores the upstream payload under its own `input` field, so the downstream template path becomes `{{input.input.response}}`.
+- If you want a stable reference to the original HTTP node regardless of later reshaping, use `{{$('action-http-1').response}}`.
 
 ## Node Families
 
@@ -95,6 +97,30 @@ Emerald includes tool variants for these families:
 
 ### Logic
 
+In the editor, `logic:merge`, `logic:aggregate`, `logic:sort`, `logic:limit`, `logic:remove_duplicates`, and `logic:summarize` appear in transformation-oriented palette groups. `action:lua` remains in the general action palette as the flexible custom-code option.
+
+### `action:lua`
+
+- Executes the configured Lua script in-process.
+- Exposes the current payload as the global `input`.
+- Mirrors top-level input keys as globals, but `input.field` is the clearer style.
+- Lua arrays are 1-based.
+- Returning a table produces structured output. Returning a primitive becomes `{"result": ...}` downstream.
+
+Bundled helper modules are available through `require()`:
+
+- `strings`: Go `strings` helpers such as split, trim, prefix/suffix checks, and case conversion. Upstream: [chai2010/glua-strings](https://github.com/chai2010/glua-strings)
+- `template`: Go `text/template` rendering from Lua strings or files. Upstream: [kohkimakimoto/gluatemplate](https://github.com/kohkimakimoto/gluatemplate)
+- `url`: URL parsing, building, resolution, and query-string helpers. Upstream: [cjoudrey/gluaurl](https://github.com/cjoudrey/gluaurl)
+- `re`: Go-regexp-backed matching, find, gsub, and gmatch helpers. Upstream: [yuin/gluare](https://github.com/yuin/gluare)
+- `http`: HTTP request helpers for GET/POST/PUT/PATCH/DELETE plus response accessors. Upstream: [cjoudrey/gluahttp](https://github.com/cjoudrey/gluahttp)
+- `scrape`: HTML scraping helpers for extracting text and attributes from response bodies. Upstream: [felipejfc/gluahttpscrape](https://github.com/felipejfc/gluahttpscrape)
+
+Notes:
+
+- `http` requests inherit the pipeline execution context, so cancellation and timeouts propagate into Lua-side requests.
+- Emerald intentionally does not expose `http.request_batch` because the upstream implementation is not safe to run against one Lua state concurrently.
+
 ### `logic:condition`
 
 - Evaluates one boolean expression.
@@ -152,6 +178,45 @@ Emerald includes tool variants for these families:
 ```
 
 - `idOverrides` can rename keys inside `byNodeId`.
+
+### Array Transform Nodes
+
+`logic:sort`, `logic:limit`, `logic:remove_duplicates`, and `logic:summarize` follow the same payload-preserving pattern:
+
+- read an array from `inputPath`
+- clone the current payload
+- write the transformed value to `outputPath`
+- return the cloned payload so unrelated fields stay available downstream
+
+These nodes transform data inside one payload. They do not split the flow into per-item executions.
+
+### `logic:sort`
+
+- Sorts an array from `inputPath`.
+- Defaults `outputPath` to the same path as `inputPath`.
+- Supports optional `fieldPath` for object arrays.
+- `direction` can be `asc` or `desc`.
+- `valueType` can be `auto`, `string`, `number`, or `datetime`.
+
+### `logic:limit`
+
+- Trims an array from `inputPath` to the first `maxItems` entries.
+- Defaults `outputPath` to `inputPath`.
+- Useful before prompts, summaries, or downstream APIs that only need a subset.
+
+### `logic:remove_duplicates`
+
+- Deduplicates an array from `inputPath`.
+- `strategy` can be `whole_item` or `field`.
+- `fieldPath` is required when `strategy` is `field`.
+- `keep` controls whether the first or last matching item survives.
+
+### `logic:summarize`
+
+- Builds aggregate metrics for an array from `inputPath`.
+- Defaults `outputPath` to `summary`.
+- Optional `groupByPath` creates grouped summaries.
+- `metrics` support `count`, `sum`, `avg`, `min`, and `max`.
 
 ### `logic:return`
 

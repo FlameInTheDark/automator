@@ -43,6 +43,7 @@ Expressions and templates solve different problems:
 
 - Use Expr syntax in logic-node expression fields.
 - Use `{{ ... }}` templates in string-based config fields such as prompts, messages, URLs, headers, and request bodies.
+- Use executed-node template lookups like `{{$('action-http-1').response.status_code}}` only in template-enabled fields, not in Expr expressions.
 
 Correct:
 
@@ -74,3 +75,5 @@ Example:
 
 - After an HTTP node, `input.response` may exist directly.
 - After a `logic:switch`, the switch output contains the previous payload under `input`, so later templates or expressions may need `input.input.response`.
+
+For template-specific behavior and cross-node lookup rules, see the [template guide](../templates/README.md).

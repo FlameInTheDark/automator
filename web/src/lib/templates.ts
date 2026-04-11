@@ -168,18 +168,19 @@ function collectPaths(
   results: TemplateSuggestion[],
   seen: Set<string>,
   depth: number,
+  group?: string,
 ): void {
   if (depth > 3 || !path) {
     return
   }
 
-  addSuggestion(results, seen, path, path, describeValue(value))
+  addSuggestion(results, seen, path, path, describeValue(value), undefined, group)
 
   if (Array.isArray(value)) {
     if (value.length === 0) {
       return
     }
-    collectPaths(value[0], `${path}[0]`, results, seen, depth + 1)
+    collectPaths(value[0], `${path}[0]`, results, seen, depth + 1, group)
     return
   }
 
@@ -188,7 +189,7 @@ function collectPaths(
   }
 
   Object.entries(value).forEach(([key, child]) => {
-    collectPaths(child, `${path}.${key}`, results, seen, depth + 1)
+    collectPaths(child, `${path}.${key}`, results, seen, depth + 1, group)
   })
 }
 
@@ -214,6 +215,8 @@ function addSuggestion(
   expression: string,
   label: string,
   description?: string,
+  badge?: string,
+  group?: string,
 ): void {
   if (!expression || seen.has(expression)) {
     return
@@ -226,6 +229,8 @@ function addSuggestion(
     label,
     description,
     kind: 'template',
+    badge,
+    group,
   })
 }
 
@@ -249,6 +254,7 @@ function buildSchemaSuggestions(
     template: `{{${hint.expression}}}`,
     label: hint.label,
     description: sourceLabel ? `${hint.description ?? 'Suggested field.'} Source: ${sourceLabel}.` : hint.description,
+    group: 'Current Input',
   }))
 }
 
@@ -260,7 +266,83 @@ function buildSecretSuggestions(secrets: SecretMetadata[] = []): TemplateSuggest
     description: 'Global secret value resolved at runtime.',
     kind: 'template',
     badge: 'Secret',
+    group: 'Secrets',
   }))
+}
+
+function buildLatestExecutionMap(latestNodeExecutions: NodeExecution[] = []): Map<string, NodeExecution> {
+  return latestNodeExecutions.reduce((acc, execution) => {
+    acc.set(execution.node_id, execution)
+    return acc
+  }, new Map<string, NodeExecution>())
+}
+
+function collectNodeReferencePaths(
+  value: unknown,
+  expression: string,
+  sourceLabel: string,
+  results: TemplateSuggestion[],
+  seen: Set<string>,
+  depth: number,
+): void {
+  if (depth > 3 || !expression) {
+    return
+  }
+
+  addSuggestion(
+    results,
+    seen,
+    expression,
+    `${sourceLabel}: ${expression}`,
+    `Reference output from ${sourceLabel}. This resolves only after that node has run in the current execution.`,
+    'Node',
+    sourceLabel,
+  )
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return
+    }
+    collectNodeReferencePaths(value[0], `${expression}[0]`, sourceLabel, results, seen, depth + 1)
+    return
+  }
+
+  if (!isObject(value)) {
+    return
+  }
+
+  Object.entries(value).forEach(([key, child]) => {
+    collectNodeReferencePaths(child, `${expression}.${key}`, sourceLabel, results, seen, depth + 1)
+  })
+}
+
+function buildNodeReferenceSuggestions(
+  selectedNodeId: string,
+  nodes: Node[],
+  latestNodeExecutions: NodeExecution[] = [],
+): TemplateSuggestion[] {
+  const latestByNodeId = buildLatestExecutionMap(latestNodeExecutions)
+  const results: TemplateSuggestion[] = []
+  const seen = new Set<string>()
+
+  nodes
+    .filter((node) => node.id !== selectedNodeId)
+    .forEach((node) => {
+      const execution = latestByNodeId.get(node.id)
+      if (!execution) {
+        return
+      }
+
+      const output = parseExecutionJSON(execution.output)
+      if (output === undefined) {
+        return
+      }
+
+      const sourceLabel = (node.data?.label as string | undefined) || node.id
+      collectNodeReferencePaths(output, `$('${node.id}')`, sourceLabel, results, seen, 0)
+    })
+
+  return results
 }
 
 function mergeSourceOutputs(outputs: unknown[]): Record<string, unknown> {
@@ -412,11 +494,9 @@ export function buildTemplateSuggestions(
   const seen = new Set<string>()
 
   const incomingEdges = edges.filter((edge) => edge.target === selectedNodeId)
-  if (incomingEdges.length === 0) {
-    return results
+  if (incomingEdges.length > 0) {
+      addSuggestion(results, seen, 'input', 'Entire merged input', 'All incoming data, inserted as JSON.', undefined, 'Current Input')
   }
-
-  addSuggestion(results, seen, 'input', 'Entire merged input', 'All incoming data, inserted as JSON.')
 
   const sourceNodes = incomingEdges
     .map((edge) => nodes.find((node) => node.id === edge.source))
@@ -429,19 +509,23 @@ export function buildTemplateSuggestions(
 
   const mergedOutput = mergeSourceOutputs(latestOutputs)
   if (Object.keys(mergedOutput).length > 0) {
-    collectPaths(mergedOutput, 'input', results, seen, 0)
+    collectPaths(mergedOutput, 'input', results, seen, 0, 'Current Input')
   }
 
   sourceNodes.forEach((node) => {
     const sourceType = node.data?.type as NodeType | undefined
     const sourceLabel = (node.data?.label as string | undefined) || node.id
     buildSchemaSuggestions(sourceType, nodeDefinitions, sourceLabel).forEach((suggestion) => {
-      addSuggestion(results, seen, suggestion.expression, suggestion.label, suggestion.description)
+      addSuggestion(results, seen, suggestion.expression, suggestion.label, suggestion.description, suggestion.badge, suggestion.group)
     })
   })
 
+  buildNodeReferenceSuggestions(selectedNodeId, nodes, latestNodeExecutions).forEach((suggestion) => {
+    addSuggestion(results, seen, suggestion.expression, suggestion.label, suggestion.description, suggestion.badge, suggestion.group)
+  })
+
   buildSecretSuggestions(secrets).forEach((suggestion) => {
-    addSuggestion(results, seen, suggestion.expression, suggestion.label, suggestion.description)
+    addSuggestion(results, seen, suggestion.expression, suggestion.label, suggestion.description, suggestion.badge, suggestion.group)
   })
 
   return results

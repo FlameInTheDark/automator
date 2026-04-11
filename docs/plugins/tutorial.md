@@ -309,7 +309,7 @@ That means it should validate:
 - JSON shape
 - obviously invalid static values
 
-It should not assume that `{{input.foo}}` or `{{secret.api_token}}` is already resolved.
+It should not assume that `{{input.foo}}`, `{{secret.api_token}}`, or `{{$('node-id').field}}` is already resolved.
 
 ### `Execute`
 
@@ -322,6 +322,7 @@ It should not assume that `{{input.foo}}` or `{{secret.api_token}}` is already r
 in the `bearerToken` field, your plugin receives the resolved string value, not the template expression.
 
 The `input` parameter contains the current payload flowing into the node. That is the same runtime object users access in templates as `input`.
+Template-enabled fields can also reference a specific earlier node output with syntax like `{{$('action-http-1').response.status_code}}` once that node has already executed in the current run.
 
 ### `MenuPath`
 
@@ -408,6 +409,12 @@ Downstream nodes can reference output values like:
 {{input.body}}
 ```
 
+Or they can reach this plugin node by ID from later template-enabled fields:
+
+```text
+{{$('action-plugin-hello-http-fetch').status_code}}
+```
+
 Because the action returns a normal JSON object, plugin nodes behave like built-in nodes during templating.
 
 ## Step 9: Add a Secret
@@ -415,7 +422,7 @@ Because the action returns a normal JSON object, plugin nodes behave like built-
 If your plugin needs credentials:
 
 1. Open `Settings`.
-2. Create a secret named `api_token`.
+2. Open `Security -> Secrets` and create a secret named `api_token`.
 3. Put `{{secret.api_token}}` into a template-enabled field.
 
 At runtime, Emerald resolves the secret before calling your action. The secret value is not returned by normal secret list APIs and is not meant to be stored in ordinary execution context snapshots.
@@ -508,6 +515,7 @@ So for v1:
 
 - keep tool-definition config static when possible
 - do not depend on `{{input.*}}` while building the tool definition
+- do not depend on `{{$('node-id').*}}` while building the tool definition unless that dependency is guaranteed to be available before `ToolDefinition`
 - put dynamic behavior in `ExecuteTool`
 
 If you need a full working example that includes both an action node and a tool node, use:

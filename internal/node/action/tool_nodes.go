@@ -524,7 +524,7 @@ func (e *ShellCommandToolNode) execute(ctx context.Context, config json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 

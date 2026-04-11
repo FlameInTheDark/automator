@@ -24,7 +24,7 @@ func (e *ConditionNode) Execute(ctx context.Context, config json.RawMessage, inp
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -94,7 +94,7 @@ func (e *SwitchNode) Execute(ctx context.Context, config json.RawMessage, input 
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 
@@ -219,7 +219,7 @@ func (e *LLMPromptNode) Execute(ctx context.Context, config json.RawMessage, inp
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := templating.RenderStrings(&cfg, input); err != nil {
+	if err := templating.RenderStringsWithContext(ctx, &cfg, input); err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
 

@@ -11,14 +11,18 @@ Use this skill when the task is about `{{ ... }}` templates in node configuratio
 - Treat `input` as the full current payload.
 - Access nested objects with dot syntax such as `{{input.response.status}}`.
 - Access arrays with zero-based indexes such as `{{input.items[0]}}`.
+- Use executed-node lookups as `{{$('node-id').path.to.value}}` when you need data from a specific earlier node in the same run.
 - Expect rendered objects and arrays to become JSON strings when inserted into text fields.
 
 ## Know The Runtime Context
 
 - `input` is always available.
 - Top-level input keys are also exposed directly, so `{{status}}` may work when `input.status` exists.
+- `secret` exposes stored secrets at runtime, such as `{{secret.api_token}}`.
+- `$('node-id')` resolves to the decoded output object from that node's completed execution in the current run.
 - Prefer `{{input...}}` when clarity matters.
-- Missing paths cause template rendering errors rather than quietly returning partial data.
+- Cross-node selectors only work after the referenced node has already executed in the current run.
+- Missing paths, missing node IDs, or not-yet-executed node lookups cause template rendering errors rather than quietly returning partial data.
 
 ## Understand Pipeline Parameter Passing
 
@@ -40,6 +44,18 @@ leave action:pipeline_run config.params empty
 
 ```json
 {"request":"{{input.message.content}}","ticket":"{{arguments.ticket}}"}
+```
+
+- Reuse a specific upstream node output:
+
+```text
+{{$('action:http-1775583878229').response.status_code}}
+```
+
+- Mix current input, secrets, and upstream node output:
+
+```json
+{"status":"{{$('action:http-1775583878229').response.status_code}}","token":"{{secret.api_token}}","message":"{{input.message.content}}"}
 ```
 
 - Return the current payload:

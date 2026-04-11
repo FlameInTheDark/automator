@@ -23,7 +23,7 @@ func (e *ActionExecutor) Execute(ctx context.Context, config json.RawMessage, in
 		return nil, fmt.Errorf("plugin manager is not configured")
 	}
 
-	renderedConfig, err := templating.RenderJSON(config, input)
+	renderedConfig, err := templating.RenderJSONWithContext(ctx, config, input)
 	if err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
@@ -83,7 +83,7 @@ func (e *ToolExecutor) ToolDefinition(ctx context.Context, meta node.ToolNodeMet
 		return nil, fmt.Errorf("plugin manager is not configured")
 	}
 
-	renderedConfig, err := templating.RenderJSON(config, nil)
+	renderedConfig, err := templating.RenderJSONWithContext(ctx, config, nil)
 	if err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}
@@ -114,7 +114,7 @@ func (e *ToolExecutor) ExecuteTool(ctx context.Context, config json.RawMessage, 
 		return nil, fmt.Errorf("plugin manager is not configured")
 	}
 
-	renderedConfig, err := templating.RenderJSON(config, input)
+	renderedConfig, err := templating.RenderJSONWithContext(ctx, config, input)
 	if err != nil {
 		return nil, fmt.Errorf("render config: %w", err)
 	}

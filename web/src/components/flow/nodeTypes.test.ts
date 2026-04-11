@@ -83,4 +83,24 @@ describe('nodeTypes helpers', () => {
     expect(acmeGroup?.types.map((type) => type.label)).toContain('Acme Status')
     expect(requestsGroup?.types.map((type) => type.label)).toContain('Acme Request')
   })
+
+  it('includes built-in data transformation groups for logic nodes', () => {
+    const catalog = buildNodeCatalog()
+    const logicCategory = buildNodeMenuCategories(catalog.categories).find((category) => category.id === 'logic')
+    const actionCategory = buildNodeMenuCategories(catalog.categories).find((category) => category.id === 'action')
+    const transformationGroup = logicCategory?.groups.find((group) => group.label === 'Data Transformation')
+    const generalActionGroup = actionCategory?.groups.find((group) => group.label === 'General')
+    const listOperationsGroup = transformationGroup?.groups.find((group) => group.label === 'List Operations')
+    const combineGroup = transformationGroup?.groups.find((group) => group.label === 'Combine')
+    const analyticsGroup = transformationGroup?.groups.find((group) => group.label === 'Analytics')
+
+    expect(listOperationsGroup?.types.map((type) => type.type)).toEqual(
+      expect.arrayContaining(['logic:sort', 'logic:limit', 'logic:remove_duplicates']),
+    )
+    expect(combineGroup?.types.map((type) => type.type)).toEqual(
+      expect.arrayContaining(['logic:merge', 'logic:aggregate']),
+    )
+    expect(analyticsGroup?.types.map((type) => type.type)).toContain('logic:summarize')
+    expect(generalActionGroup?.types.map((type) => type.type)).toContain('action:lua')
+  })
 })

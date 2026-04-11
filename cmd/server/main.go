@@ -229,6 +229,10 @@ func main() {
 	registry.Register(node.TypeLogicSwitch, &logic.SwitchNode{})
 	registry.Register(node.TypeLogicMerge, &logic.MergeNode{})
 	registry.Register(node.TypeLogicAggregate, &logic.AggregateNode{})
+	registry.Register(node.TypeLogicSort, &logic.SortNode{})
+	registry.Register(node.TypeLogicLimit, &logic.LimitNode{})
+	registry.Register(node.TypeLogicRemoveDuplicates, &logic.RemoveDuplicatesNode{})
+	registry.Register(node.TypeLogicSummarize, &logic.SummarizeNode{})
 	llmPromptNode := &logic.LLMPromptNode{Providers: llmProviderStore}
 	registry.Register(node.TypeLLMPrompt, llmPromptNode)
 	registry.Register(node.TypeLLMPromptLegacy, llmPromptNode)

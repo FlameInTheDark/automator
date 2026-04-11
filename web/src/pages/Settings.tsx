@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { JSX } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Server, Shield, Brain, Bot, Plus, Trash2, Edit2, MessageSquare, Power, Users, Lock, RefreshCw } from 'lucide-react'
+import { Server, Shield, Brain, Plus, Trash2, Edit2, MessageSquare, Power, Users, Lock } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Card, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -10,10 +13,11 @@ import Badge from '../components/ui/Badge'
 import Skeleton from '../components/ui/Skeleton'
 import KubernetesClusterSettings from '../components/Settings/KubernetesClusterSettings'
 import AssistantProfilesSettings from '../components/Settings/AssistantProfilesSettings'
+import PluginBundleSettings from '../components/Settings/PluginBundleSettings'
 import ProviderModelSelector from '../components/Settings/ProviderModelSelector'
-import { useNodeDefinitions } from '../hooks/useNodeDefinitions'
-import { useUIStore } from '../store/ui'
+import SettingsNavigation from '../components/Settings/SettingsNavigation'
 import { cn } from '../lib/utils'
+import { useUIStore } from '../store/ui'
 import { AUTH_SESSION_QUERY_KEY, useAuthSession } from '../lib/auth'
 import type { AuthSession, Channel, Cluster, LLMProvider, SecretMetadata, User } from '../types'
 
@@ -58,6 +62,84 @@ type PasswordChangeFormState = {
   current_password: string
   new_password: string
   confirm_password: string
+}
+
+type SettingsSectionId =
+  | 'proxmox'
+  | 'kubernetes'
+  | 'channels'
+  | 'ai.providers'
+  | 'ai.assistants'
+  | 'secrets'
+  | 'plugins'
+  | 'users'
+
+type SettingsSectionGroup = {
+  id: string
+  label: string
+  items: Array<{
+    id: SettingsSectionId
+    label: string
+    icon: LucideIcon
+  }>
+}
+
+const DEFAULT_SETTINGS_SECTION: SettingsSectionId = 'proxmox'
+
+const SETTINGS_SECTION_GROUPS: SettingsSectionGroup[] = [
+  {
+    id: 'infrastructure',
+    label: 'Infrastructure',
+    items: [
+      { id: 'proxmox', label: 'Proxmox', icon: Server },
+      { id: 'kubernetes', label: 'Kubernetes', icon: Shield },
+    ],
+  },
+  {
+    id: 'messaging',
+    label: 'Messaging',
+    items: [
+      { id: 'channels', label: 'Channels', icon: MessageSquare },
+    ],
+  },
+  {
+    id: 'ai',
+    label: 'AI',
+    items: [
+      { id: 'ai.providers', label: 'Providers', icon: Brain },
+      { id: 'ai.assistants', label: 'Assistants', icon: Brain },
+    ],
+  },
+  {
+    id: 'security',
+    label: 'Security',
+    items: [
+      { id: 'secrets', label: 'Secrets', icon: Lock },
+      { id: 'users', label: 'Users', icon: Users },
+    ],
+  },
+  {
+    id: 'extensibility',
+    label: 'Extensibility',
+    items: [
+      { id: 'plugins', label: 'Plugins', icon: Power },
+    ],
+  },
+]
+
+const SETTINGS_SECTION_COMPONENTS: Record<SettingsSectionId, () => JSX.Element> = {
+  proxmox: ClusterSettings,
+  kubernetes: KubernetesClusterSettings,
+  channels: ChannelSettings,
+  'ai.providers': LLMSettings,
+  'ai.assistants': AssistantProfilesSettings,
+  secrets: SecretsSettings,
+  plugins: PluginBundleSettings,
+  users: UserSettings,
+}
+
+function isSettingsSectionId(value: string | null): value is SettingsSectionId {
+  return value !== null && Object.prototype.hasOwnProperty.call(SETTINGS_SECTION_COMPONENTS, value)
 }
 
 function getDefaultClusterForm(): ClusterFormState {
@@ -190,89 +272,54 @@ function channelToForm(channel: Channel): ChannelFormState {
 }
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<'clusters' | 'kubernetes' | 'channels' | 'ai' | 'secrets' | 'users'>('clusters')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSection = searchParams.get('section')
+  const activeSection = isSettingsSectionId(requestedSection)
+    ? requestedSection
+    : DEFAULT_SETTINGS_SECTION
+
+  useEffect(() => {
+    if (requestedSection === activeSection) {
+      return
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.set('section', activeSection)
+    setSearchParams(nextSearchParams, { replace: true })
+  }, [activeSection, requestedSection, searchParams, setSearchParams])
+
+  const ActiveSection = SETTINGS_SECTION_COMPONENTS[activeSection]
+
+  function handleSectionChange(sectionId: string) {
+    if (!isSettingsSectionId(sectionId)) {
+      return
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.set('section', sectionId)
+    setSearchParams(nextSearchParams)
+  }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-8">
+    <div className="mx-auto max-w-7xl p-6">
+      <div className="mb-8 max-w-2xl">
         <h1 className="text-2xl font-bold text-text">Settings</h1>
-        <p className="text-text-muted mt-1">Configure clusters, channels, AI, and workspace access</p>
-      </div>
-
-      <div className="mb-6 overflow-x-auto pb-1 -mb-1">
-        <div className="inline-flex min-w-max gap-1 rounded-lg border border-border bg-bg-input p-1">
-          {[
-            { id: 'clusters' as const, label: 'Proxmox Clusters', icon: Server },
-            { id: 'kubernetes' as const, label: 'Kubernetes Clusters', icon: Shield },
-            { id: 'channels' as const, label: 'Channels', icon: MessageSquare },
-            { id: 'ai' as const, label: 'AI', icon: Brain },
-            { id: 'secrets' as const, label: 'Secrets', icon: Lock },
-            { id: 'users' as const, label: 'Users', icon: Users },
-          ].map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-all',
-                activeTab === id
-                  ? 'bg-bg-elevated text-text shadow-sm'
-                  : 'text-text-muted hover:text-text',
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {activeTab === 'clusters' && <ClusterSettings />}
-      {activeTab === 'kubernetes' && <KubernetesClusterSettings />}
-      {activeTab === 'channels' && <ChannelSettings />}
-      {activeTab === 'ai' && <AISettings />}
-      {activeTab === 'secrets' && <SecretsSettings />}
-      {activeTab === 'users' && <UserSettings />}
-    </div>
-  )
-}
-
-function AISettings() {
-  const [activeTab, setActiveTab] = useState<'providers' | 'assistants'>('providers')
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-text">AI</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Manage provider connections and the default instruction profiles used by assistant experiences.
+        <p className="mt-1 text-text-muted">
+          Configure infrastructure connections, channels, secrets, AI behavior, and local extension health.
         </p>
       </div>
 
-      <div className="overflow-x-auto pb-1 -mb-1">
-        <div className="inline-flex min-w-max gap-1 rounded-xl border border-border bg-bg-input p-1">
-          {[
-            { id: 'providers' as const, label: 'Providers', icon: Brain },
-            { id: 'assistants' as const, label: 'Assistants', icon: Bot },
-          ].map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors',
-                activeTab === id
-                  ? 'bg-bg-elevated text-text shadow-sm'
-                  : 'text-text-muted hover:text-text',
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
+      <div className="flex flex-col gap-6 md:flex-row md:items-start">
+        <SettingsNavigation
+          groups={SETTINGS_SECTION_GROUPS}
+          activeSection={activeSection}
+          onSelect={handleSectionChange}
+        />
+
+        <div className="min-w-0 flex-1">
+          <ActiveSection />
         </div>
       </div>
-
-      {activeTab === 'providers' ? <LLMSettings /> : <AssistantProfilesSettings />}
     </div>
   )
 }
@@ -280,7 +327,6 @@ function AISettings() {
 function SecretsSettings() {
   const queryClient = useQueryClient()
   const { addToast } = useUIStore()
-  const { plugins, isLoading: arePluginsLoading } = useNodeDefinitions()
   const [showForm, setShowForm] = useState(false)
   const [editingSecretId, setEditingSecretId] = useState<string | null>(null)
   const [loadingSecretId, setLoadingSecretId] = useState<string | null>(null)
@@ -332,30 +378,6 @@ function SecretsSettings() {
     },
     onError: (err) => {
       addToast({ type: 'error', title: 'Failed to delete secret', message: err.message })
-    },
-  })
-
-  const refreshPluginsMutation = useMutation({
-    mutationFn: () => api.nodeDefinitions.refresh(),
-    onSuccess: (data) => {
-      queryClient.setQueryData(['node-definitions'], data)
-      if (data.error) {
-        addToast({
-          type: 'warning',
-          title: 'Plugins rediscovered with issues',
-          message: data.error,
-        })
-        return
-      }
-
-      addToast({
-        type: 'success',
-        title: 'Plugins rediscovered',
-        message: 'Emerald reloaded local plugin bundles without a restart.',
-      })
-    },
-    onError: (err) => {
-      addToast({ type: 'error', title: 'Failed to rediscover plugins', message: err.message })
     },
   })
 
@@ -572,70 +594,6 @@ function SecretsSettings() {
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 className="text-base font-semibold text-text">Installed Plugin Bundles</h3>
-              <p className="mt-1 text-sm text-text-muted">
-                Emerald discovers local plugin bundles and surfaces their health here so missing or broken nodes are easier to spot.
-              </p>
-            </div>
-            <Button
-              variant="secondary"
-              onClick={() => refreshPluginsMutation.mutate()}
-              loading={refreshPluginsMutation.isPending}
-            >
-              <RefreshCw className="w-4 h-4" />
-              Rediscover Plugins
-            </Button>
-          </div>
-
-          {arePluginsLoading && (
-            <>
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </>
-          )}
-
-          {!arePluginsLoading && plugins.length === 0 && (
-            <div className="rounded-xl border border-dashed border-border px-4 py-6 text-sm text-text-muted">
-              No plugin bundles discovered yet. Add bundles under <code>.agents/plugins</code> or configure <code>AUTOMATOR_PLUGINS_DIR</code>.
-            </div>
-          )}
-
-          {!arePluginsLoading && plugins.map((plugin) => (
-            <div
-              key={plugin.id}
-              className="rounded-xl border border-border bg-bg-overlay/40 px-4 py-4"
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="truncate text-base font-semibold text-text">{plugin.name}</h4>
-                    {plugin.version && <Badge variant="default">v{plugin.version}</Badge>}
-                    <Badge variant={plugin.healthy ? 'success' : 'error'}>
-                      {plugin.healthy ? 'Healthy' : 'Unavailable'}
-                    </Badge>
-                  </div>
-                  {plugin.description && (
-                    <p className="mt-1 text-sm text-text-muted">{plugin.description}</p>
-                  )}
-                  <p className="mt-1 text-xs text-text-dimmed">
-                    {plugin.node_count} node{plugin.node_count === 1 ? '' : 's'} from {plugin.path}
-                  </p>
-                </div>
-                {plugin.error && (
-                  <div className="max-w-xl rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2 text-sm text-red-300">
-                    {plugin.error}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
         </CardContent>
       </Card>
     </div>

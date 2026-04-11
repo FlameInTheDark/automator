@@ -144,4 +144,80 @@ describe('buildPromptInsertSuggestions', () => {
       ]),
     )
   })
+
+  it('includes cross-node reference suggestions grouped by source node', () => {
+    const suggestions = buildTemplateSuggestions(
+      'prompt',
+      nodes,
+      edges,
+      [
+        {
+          id: 'exec-source',
+          execution_id: 'exec-1',
+          node_id: 'source',
+          node_type: 'action:http',
+          status: 'completed',
+          output: JSON.stringify({
+            status_code: 202,
+            response: { body: { ok: true } },
+          }),
+        },
+      ],
+      undefined,
+      [],
+    )
+
+    expect(suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          expression: "$('source').status_code",
+          template: "{{$('source').status_code}}",
+          badge: 'Node',
+          group: 'Source HTTP',
+        }),
+        expect.objectContaining({
+          expression: "$('source').response.body.ok",
+          template: "{{$('source').response.body.ok}}",
+          badge: 'Node',
+          group: 'Source HTTP',
+        }),
+      ]),
+    )
+  })
+
+  it('still includes secrets when the selected node has no incoming edges', () => {
+    const suggestions = buildTemplateSuggestions(
+      'isolated',
+      [
+        ...nodes,
+        {
+          id: 'isolated',
+          position: { x: 480, y: 0 },
+          data: { label: 'Isolated Node', type: 'llm:prompt' },
+        },
+      ],
+      [],
+      [],
+      undefined,
+      [
+        {
+          id: 'secret-1',
+          name: 'api_token',
+          created_at: '2026-04-10T00:00:00Z',
+          updated_at: '2026-04-10T00:00:00Z',
+        },
+      ],
+    )
+
+    expect(suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          expression: 'secret.api_token',
+          template: '{{secret.api_token}}',
+          badge: 'Secret',
+          group: 'Secrets',
+        }),
+      ]),
+    )
+  })
 })

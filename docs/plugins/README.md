@@ -213,7 +213,7 @@ It helps to think about action config in two phases:
 That means:
 
 - validate required keys, JSON shape, and obvious bad values in `ValidateConfig`
-- do not expect `{{input.*}}` or `{{secret.*}}` placeholders to be resolved during `ValidateConfig`
+- do not expect `{{input.*}}`, `{{secret.*}}`, or `{{$('node-id').*}}` placeholders to be resolved during `ValidateConfig`
 - expect plain rendered values in `Execute`
 
 The `input` argument passed to `Execute` is the current node payload. It is the same object users can reference in templates as `input`.
@@ -240,7 +240,9 @@ Useful field properties:
 - `default_bool_value`
 - `default_number_value`
 
-If `template_supported` is enabled, users can put values like `{{input.foo}}` or `{{secret.api_token}}` into that field.
+If `template_supported` is enabled, users can put values like `{{input.foo}}`, `{{secret.api_token}}`, or `{{$('action-http-1').response.status_code}}` into that field.
+
+Cross-node selectors only resolve after the referenced node has already executed in the current run.
 
 ### Declaring Custom Output Handles
 
@@ -338,6 +340,7 @@ Useful details:
 - Secret values are injected into runtime context but are not stored in normal execution context records.
 - List and metadata APIs return secret names and timestamps, not plaintext values.
 - Action node config can use secrets the same way built-in nodes do.
+- Template-enabled fields can also read earlier node results with `{{$('node-id').path}}` when that node has already run in the current execution path.
 
 Because tool definitions are built before normal runtime input is available, keep secret-dependent tool config limited to fields that matter during `ExecuteTool`, not fields required to build the tool schema.
 

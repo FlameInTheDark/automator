@@ -487,6 +487,7 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         icon: 'workflow',
         category: 'logic',
         color: '#8b5cf6',
+        menuPath: ['Data Transformation', 'Combine'],
         defaultConfig: { mode: 'shallow' },
       },
       {
@@ -496,7 +497,59 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         icon: 'list',
         category: 'logic',
         color: '#8b5cf6',
+        menuPath: ['Data Transformation', 'Combine'],
         defaultConfig: { idOverrides: {} },
+      },
+      {
+        type: 'logic:sort',
+        label: 'Sort',
+        description: 'Sort an array from the current payload and write it back to a target path',
+        icon: 'arrow-up-down',
+        category: 'logic',
+        color: '#8b5cf6',
+        menuPath: ['Data Transformation', 'List Operations'],
+        defaultConfig: { inputPath: 'items', outputPath: 'items', fieldPath: '', direction: 'asc', valueType: 'auto' },
+      },
+      {
+        type: 'logic:limit',
+        label: 'Limit',
+        description: 'Trim an array in the current payload to a maximum number of items',
+        icon: 'list-end',
+        category: 'logic',
+        color: '#8b5cf6',
+        menuPath: ['Data Transformation', 'List Operations'],
+        defaultConfig: { inputPath: 'items', outputPath: 'items', maxItems: 10 },
+      },
+      {
+        type: 'logic:remove_duplicates',
+        label: 'Remove Duplicates',
+        description: 'Remove duplicate items from an array using whole-item or field-based comparison',
+        icon: 'copy-x',
+        category: 'logic',
+        color: '#8b5cf6',
+        menuPath: ['Data Transformation', 'List Operations'],
+        defaultConfig: { inputPath: 'items', outputPath: 'items', strategy: 'whole_item', fieldPath: '', keep: 'first' },
+      },
+      {
+        type: 'logic:summarize',
+        label: 'Summarize',
+        description: 'Calculate summary metrics for an array and write the result to a summary path',
+        icon: 'calculator',
+        category: 'logic',
+        color: '#8b5cf6',
+        menuPath: ['Data Transformation', 'Analytics'],
+        defaultConfig: {
+          inputPath: 'items',
+          outputPath: 'summary',
+          groupByPath: '',
+          metrics: [
+            {
+              name: 'total',
+              op: 'count',
+              fieldPath: '',
+            },
+          ],
+        },
       },
       {
         type: 'logic:return',
@@ -731,9 +784,10 @@ export function buildNodeMenuCategories(categories: NodeCategory[]): NodeMenuCat
       }
 
       let currentGroups = rootGroups
-      let currentGroup: NodeMenuGroup | null = null
+      let currentGroup: NodeMenuGroup | undefined
 
-      menuPath.forEach((segment, index) => {
+      for (let index = 0; index < menuPath.length; index += 1) {
+        const segment = menuPath[index]
         const nextPath = menuPath.slice(0, index + 1)
         const groupID = nextPath.join(' / ')
         const existing = currentGroups.find((group) => group.id === groupID)
@@ -754,7 +808,7 @@ export function buildNodeMenuCategories(categories: NodeCategory[]): NodeMenuCat
         if (index < menuPath.length - 1 && currentGroup) {
           currentGroups = currentGroup.groups
         }
-      })
+      }
 
       currentGroup?.types.push(type)
     })
