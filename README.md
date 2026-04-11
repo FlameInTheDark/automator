@@ -22,7 +22,7 @@ Emerald is a single-binary automation platform for building visual pipelines aro
 - Built-in chat workspace for working directly with your configured LLM providers
 - Infrastructure automation for Proxmox and Kubernetes
 - Built-in HTTP, shell command, Lua, channel, and sub-pipeline execution nodes
-- n8n-inspired data transformation nodes for sorting, limiting, deduplicating, and summarizing arrays in-place
+- Built-in data transformation nodes for sorting, limiting, deduplicating, and summarizing arrays in-place
 - LLM prompt and agent nodes with connected tool nodes
 - Cross-node templates with `{{$('node-id').path}}` lookups alongside `input` and `secret`
 - Workspace skill loading from the nearest `.agents/skills`, with optional override support
