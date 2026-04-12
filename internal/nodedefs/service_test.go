@@ -205,3 +205,41 @@ func TestPluginDefinitionFromBindingUsesConfiguredMenuPath(t *testing.T) {
 		t.Fatalf("expected configured plugin menu path to be preserved, got %#v", definition.MenuPath)
 	}
 }
+
+func TestPluginDefinitionFromBindingUsesTriggerCategory(t *testing.T) {
+	t.Parallel()
+
+	definition := pluginDefinitionFromBinding(anyBinding{
+		Type:       "trigger:plugin/acme/inbox",
+		PluginID:   "acme",
+		PluginName: "Acme Service",
+		Spec: pluginapi.NodeSpec{
+			ID:       "inbox",
+			Kind:     pluginapi.NodeKindTrigger,
+			Label:    "Inbox Trigger",
+			MenuPath: []string{"Acme Service"},
+		},
+	})
+
+	if definition.Category != "trigger" {
+		t.Fatalf("expected trigger category, got %q", definition.Category)
+	}
+	if len(definition.MenuPath) != 1 || definition.MenuPath[0] != "Acme Service" {
+		t.Fatalf("expected configured trigger menu path to be preserved, got %#v", definition.MenuPath)
+	}
+}
+
+func TestBuiltinWebhookDefinitionIncludesVisibleTokenField(t *testing.T) {
+	t.Parallel()
+
+	definitions := BuiltinDefinitions()
+	byType := make(map[string]Definition, len(definitions))
+	for _, definition := range definitions {
+		byType[definition.Type] = definition
+	}
+
+	webhook := byType["trigger:webhook"]
+	if webhook.DefaultConfig["token"] != "" {
+		t.Fatalf("expected trigger:webhook token default to be empty string, got %#v", webhook.DefaultConfig["token"])
+	}
+}

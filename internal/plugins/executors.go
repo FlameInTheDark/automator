@@ -12,10 +12,17 @@ import (
 	"github.com/FlameInTheDark/emerald/pkg/pluginapi"
 )
 
+const pluginTriggerEventKey = "_plugin_trigger"
+
 type ActionExecutor struct {
 	Manager  *Manager
 	NodeType string
 	Outputs  []pluginapi.OutputHandle
+}
+
+type TriggerExecutor struct {
+	Manager  *Manager
+	NodeType string
 }
 
 func (e *ActionExecutor) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
@@ -46,6 +53,46 @@ func (e *ActionExecutor) Execute(ctx context.Context, config json.RawMessage, in
 }
 
 func (e *ActionExecutor) Validate(config json.RawMessage) error {
+	if e == nil || e.Manager == nil {
+		return fmt.Errorf("plugin manager is not configured")
+	}
+	return e.Manager.ValidateConfig(context.Background(), e.NodeType, config)
+}
+
+func (e *TriggerExecutor) Execute(_ context.Context, _ json.RawMessage, input map[string]any) (*node.NodeResult, error) {
+	if e == nil || e.Manager == nil {
+		return nil, fmt.Errorf("plugin manager is not configured")
+	}
+
+	event, err := pluginTriggerEventFromInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	output := map[string]any{
+		"triggered_by":    "plugin",
+		"subscription_id": event.SubscriptionID,
+		"payload":         event.Payload,
+	}
+
+	if payloadMap, ok := event.Payload.(map[string]any); ok {
+		for key, value := range payloadMap {
+			if _, exists := output[key]; exists {
+				continue
+			}
+			output[key] = value
+		}
+	}
+
+	payload, err := json.Marshal(output)
+	if err != nil {
+		return nil, fmt.Errorf("encode plugin trigger output: %w", err)
+	}
+
+	return &node.NodeResult{Output: payload}, nil
+}
+
+func (e *TriggerExecutor) Validate(config json.RawMessage) error {
 	if e == nil || e.Manager == nil {
 		return fmt.Errorf("plugin manager is not configured")
 	}
@@ -154,4 +201,39 @@ func validateActionOutput(output any, handles []pluginapi.OutputHandle) error {
 	}
 
 	return nil
+}
+
+func PluginTriggerExecutionContext(subscriptionID string, payload any) map[string]any {
+	return map[string]any{
+		pluginTriggerEventKey: map[string]any{
+			"subscription_id": strings.TrimSpace(subscriptionID),
+			"payload":         payload,
+		},
+	}
+}
+
+func pluginTriggerEventFromInput(input map[string]any) (*pluginapi.TriggerEvent, error) {
+	if len(input) == 0 {
+		return nil, fmt.Errorf("plugin trigger event is missing")
+	}
+
+	rawEvent, ok := input[pluginTriggerEventKey]
+	if !ok {
+		return nil, fmt.Errorf("plugin trigger event is missing")
+	}
+
+	eventMap, ok := rawEvent.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("plugin trigger event has invalid shape")
+	}
+
+	subscriptionID, _ := eventMap["subscription_id"].(string)
+	if strings.TrimSpace(subscriptionID) == "" {
+		return nil, fmt.Errorf("plugin trigger subscription id is missing")
+	}
+
+	return &pluginapi.TriggerEvent{
+		SubscriptionID: strings.TrimSpace(subscriptionID),
+		Payload:        eventMap["payload"],
+	}, nil
 }

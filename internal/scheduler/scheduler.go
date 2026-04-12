@@ -16,7 +16,7 @@ import (
 	"github.com/FlameInTheDark/emerald/internal/pipeline"
 )
 
-type PipelineRunner func(ctx context.Context, pipelineID string) error
+type PipelineRunner func(ctx context.Context, pipelineID string, rootNodeID string) error
 
 type Scheduler struct {
 	cron           *cron.Cron
@@ -48,7 +48,7 @@ func (s *Scheduler) Stop() {
 	log.Println("cron scheduler stopped")
 }
 
-func (s *Scheduler) AddJob(jobKey, pipelineID, schedule string) error {
+func (s *Scheduler) AddJob(jobKey, pipelineID, rootNodeID, schedule string) error {
 	sched, err := cron.ParseStandard(schedule)
 	if err != nil {
 		return fmt.Errorf("parse schedule: %w", err)
@@ -58,7 +58,7 @@ func (s *Scheduler) AddJob(jobKey, pipelineID, schedule string) error {
 		ctx := context.Background()
 
 		if s.pipelineRunner != nil {
-			if err := s.pipelineRunner(ctx, pipelineID); err != nil {
+			if err := s.pipelineRunner(ctx, pipelineID, rootNodeID); err != nil {
 				log.Printf("cron job %s: pipeline execution failed: %v", jobKey, err)
 			}
 		}
@@ -115,7 +115,7 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 				continue
 			}
 
-			if err := s.AddJob(pipelineID+":"+flowNode.ID, pipelineID, cfg.Schedule); err != nil {
+			if err := s.AddJob(pipelineID+":"+flowNode.ID, pipelineID, flowNode.ID, cfg.Schedule); err != nil {
 				log.Printf("failed to add cron job for pipeline %s node %s: %v", pipelineID, flowNode.ID, err)
 			}
 		}
@@ -136,7 +136,7 @@ func (s *Scheduler) clearJobs() {
 }
 
 func ExecutePipeline(ctx context.Context, db *sql.DB, pipelineID string, engine *pipeline.Engine, flowData pipeline.FlowData) error {
-	return ExecutePipelineWithTrigger(ctx, db, pipelineID, engine, flowData, "cron", nil)
+	return ExecutePipelineWithSelection(ctx, db, pipelineID, engine, flowData, pipeline.TriggerSelection{TriggerType: "cron"}, nil)
 }
 
 func ExecutePipelineWithTrigger(
@@ -148,17 +148,37 @@ func ExecutePipelineWithTrigger(
 	triggerType string,
 	executionContext map[string]any,
 ) error {
+	return ExecutePipelineWithSelection(ctx, db, pipelineID, engine, flowData, pipeline.TriggerSelection{TriggerType: triggerType}, executionContext)
+}
+
+func ExecutePipelineWithSelection(
+	ctx context.Context,
+	db *sql.DB,
+	pipelineID string,
+	engine *pipeline.Engine,
+	flowData pipeline.FlowData,
+	selection pipeline.TriggerSelection,
+	executionContext map[string]any,
+) error {
+	resolvedSelection := pipeline.ResolveTriggerSelection(ctx, flowData, selection)
 	execution := &models.Execution{
 		ID:          uuid.New().String(),
 		PipelineID:  pipelineID,
-		TriggerType: triggerType,
+		TriggerType: resolvedSelection.TriggerType,
 		Status:      "running",
 		StartedAt:   time.Now(),
 	}
 
+	persistedContext := cloneExecutionContext(executionContext)
 	var contextJSON *string
-	if executionContext != nil {
-		if data, err := json.Marshal(executionContext); err == nil {
+	if len(resolvedSelection.RootNodeIDs) > 0 {
+		persistedContext["_trigger_selection"] = map[string]any{
+			"trigger_type":  resolvedSelection.TriggerType,
+			"root_node_ids": append([]string(nil), resolvedSelection.RootNodeIDs...),
+		}
+	}
+	if len(persistedContext) > 0 {
+		if data, err := json.Marshal(persistedContext); err == nil {
 			str := string(data)
 			contextJSON = &str
 		}
@@ -171,7 +191,7 @@ func ExecutePipelineWithTrigger(
 		return fmt.Errorf("create execution record: %w", err)
 	}
 
-	state, err := engine.ExecuteWithInput(pipeline.WithPipelineCall(ctx, pipelineID), flowData, triggerType, executionContext)
+	state, err := engine.ExecuteWithSelection(pipeline.WithPipelineCall(ctx, pipelineID), flowData, resolvedSelection, cloneExecutionContext(executionContext))
 
 	completedAt := time.Now()
 	if err != nil {
@@ -229,6 +249,19 @@ func ExecutePipelineWithTrigger(
 	}
 
 	return nil
+}
+
+func cloneExecutionContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+
+	return cloned
 }
 
 func LoadFlowData(db *sql.DB, pipelineID string) (*pipeline.FlowData, error) {

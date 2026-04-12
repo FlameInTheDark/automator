@@ -11,6 +11,8 @@ You will build one action node that:
 
 At the end, Emerald will load the plugin as a normal node with custom config fields and branching outputs.
 
+Emerald now also supports plugin-defined trigger nodes. This tutorial stays action-focused for the first build, then points you to a trigger example at the end.
+
 ## Before You Start
 
 You need:
@@ -71,6 +73,7 @@ Emerald will expose nodes from this plugin under:
 
 ```text
 action:plugin/hello-http/<node-id>
+trigger:plugin/hello-http/<node-id>
 tool:plugin/hello-http/<node-id>
 ```
 
@@ -543,10 +546,33 @@ If the node appears but only one output pin shows up:
 - confirm Emerald is loading the latest rebuilt binary
 - confirm the editor is seeing the live plugin node definition, not an older stale node instance
 
+## Step 13: Build A Trigger Plugin Next
+
+Trigger plugins work a little differently from action and tool nodes:
+
+- the node itself only validates config
+- Emerald opens one long-lived trigger runtime stream per plugin
+- Emerald sends full active subscription snapshots to the plugin
+- the plugin emits `TriggerEvent` payloads back to Emerald
+- Emerald starts the exact subscribed root node and exposes that payload downstream
+
+The easiest reference is the sample trigger plugin in this repository:
+
+[`examples/plugins/sample-trigger-kit`](/H:/Projects/Go/src/github.com/FlameInTheDark/emerald/examples/plugins/sample-trigger-kit)
+
+It shows:
+
+- `Kind: pluginapi.NodeKindTrigger`
+- `bundle.Triggers`
+- `bundle.TriggerRuntimeProvider`
+- a runtime that rebuilds its watchers from full snapshots
+- emitted payload fields such as `message`, `sequence`, and `fired_at`
+
 ## Next Steps
 
 After this tutorial, the most useful follow-ups are:
 
 - read the [plugin reference](./README.md) for field types, manifests, and runtime behavior
 - inspect the full sample plugin at [`examples/plugins/sample-request-kit`](/H:/Projects/Go/src/github.com/FlameInTheDark/emerald/examples/plugins/sample-request-kit)
+- inspect the trigger sample at [`examples/plugins/sample-trigger-kit`](/H:/Projects/Go/src/github.com/FlameInTheDark/emerald/examples/plugins/sample-trigger-kit)
 - add a second action node or a real tool node once the first action node is working end to end

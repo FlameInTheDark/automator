@@ -34,10 +34,15 @@ type DefinitionValidator interface {
 	ValidateDefinition(ctx context.Context, nodesJSON string, edgesJSON string, allowUnavailablePlugins bool) error
 }
 
+type ActivationValidator interface {
+	ValidatePipeline(ctx context.Context, pipelineModel *models.Pipeline) error
+}
+
 type Service struct {
-	store     Store
-	reloader  Reloader
-	validator DefinitionValidator
+	store               Store
+	reloader            Reloader
+	validator           DefinitionValidator
+	activationValidator ActivationValidator
 }
 
 type Reference struct {
@@ -67,6 +72,13 @@ func NewService(store Store, reloader Reloader, validators ...DefinitionValidato
 		service.validator = validators[0]
 	}
 	return service
+}
+
+func (s *Service) SetActivationValidator(validator ActivationValidator) {
+	if s == nil {
+		return
+	}
+	s.activationValidator = validator
 }
 
 func (s *Service) List(ctx context.Context, ref Reference) ([]models.Pipeline, error) {
@@ -127,6 +139,11 @@ func (s *Service) Create(ctx context.Context, pipelineModel *models.Pipeline) er
 			return err
 		}
 	}
+	if s.activationValidator != nil {
+		if err := s.activationValidator.ValidatePipeline(ctx, pipelineModel); err != nil {
+			return err
+		}
+	}
 	if err := s.store.Create(ctx, pipelineModel); err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
 	}
@@ -144,6 +161,11 @@ func (s *Service) Update(ctx context.Context, pipelineModel *models.Pipeline) er
 	}
 	if s.validator != nil {
 		if err := s.validator.ValidateDefinition(ctx, pipelineModel.Nodes, pipelineModel.Edges, pipelineModel.Status != StatusActive); err != nil {
+			return err
+		}
+	}
+	if s.activationValidator != nil {
+		if err := s.activationValidator.ValidatePipeline(ctx, pipelineModel); err != nil {
 			return err
 		}
 	}

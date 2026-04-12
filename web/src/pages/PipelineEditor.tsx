@@ -2656,7 +2656,11 @@ function PipelineEditor() {
     const nodeDefinition = nodeType ? nodeDefinitionMap[nodeType] : undefined
     const isUnavailablePluginNode = Boolean(
       nodeType &&
-      (nodeType.startsWith('action:plugin/') || nodeType.startsWith('tool:plugin/')) &&
+      (
+        nodeType.startsWith('action:plugin/')
+        || nodeType.startsWith('tool:plugin/')
+        || nodeType.startsWith('trigger:plugin/')
+      ) &&
       !nodeDefinition,
     )
     const resizeCallbacks = node.data?.type === VISUAL_GROUP_TYPE

@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/FlameInTheDark/emerald/internal/nodedefs"
 )
 
 type NodeDefinitionsHandler struct {
-	service *nodedefs.Service
+	service  *nodedefs.Service
+	reloader nodeDefinitionsReloader
 }
 
 type nodeDefinitionsResponse struct {
@@ -16,8 +19,16 @@ type nodeDefinitionsResponse struct {
 	Error       string                `json:"error,omitempty"`
 }
 
-func NewNodeDefinitionsHandler(service *nodedefs.Service) *NodeDefinitionsHandler {
-	return &NodeDefinitionsHandler{service: service}
+type nodeDefinitionsReloader interface {
+	Reload(ctx context.Context) error
+}
+
+func NewNodeDefinitionsHandler(service *nodedefs.Service, reloaders ...nodeDefinitionsReloader) *NodeDefinitionsHandler {
+	handler := &NodeDefinitionsHandler{service: service}
+	if len(reloaders) > 0 {
+		handler.reloader = reloaders[0]
+	}
+	return handler
 }
 
 func (h *NodeDefinitionsHandler) List(c *fiber.Ctx) error {
@@ -33,9 +44,20 @@ func (h *NodeDefinitionsHandler) Refresh(c *fiber.Ctx) error {
 		return c.JSON(nodeDefinitionsResponse{Definitions: []nodedefs.Definition{}})
 	}
 
-	refreshErr := h.service.RefreshPlugins(c.UserContext())
-	if refreshErr != nil {
-		return c.JSON(h.response(refreshErr.Error()))
+	var errMsg string
+	if refreshErr := h.service.RefreshPlugins(c.UserContext()); refreshErr != nil {
+		errMsg = refreshErr.Error()
+	}
+	if h.reloader != nil {
+		if reloadErr := h.reloader.Reload(c.UserContext()); reloadErr != nil {
+			if errMsg != "" {
+				errMsg += "; "
+			}
+			errMsg += reloadErr.Error()
+		}
+	}
+	if errMsg != "" {
+		return c.JSON(h.response(errMsg))
 	}
 
 	return c.JSON(h.response(""))

@@ -1,6 +1,6 @@
 # Plugin Development
 
-Emerald supports custom action and tool nodes through a Go-first sidecar plugin runtime built on HashiCorp `go-plugin` with gRPC transport.
+Emerald supports custom action, trigger, and tool nodes through a Go-first sidecar plugin runtime built on HashiCorp `go-plugin` with gRPC transport.
 
 This section is split into two parts:
 
@@ -10,6 +10,7 @@ This section is split into two parts:
 ## What Plugins Can Add Today
 
 - Custom action nodes under `action:plugin/<plugin-id>/<node-id>`
+- Custom trigger nodes under `trigger:plugin/<plugin-id>/<node-id>`
 - Custom tool nodes under `tool:plugin/<plugin-id>/<node-id>`
 - Custom config fields rendered in the node settings panel
 - Custom output handles for action nodes
@@ -17,7 +18,6 @@ This section is split into two parts:
 
 Current v1 limits:
 
-- No plugin-defined trigger nodes
 - No plugin-defined logic nodes
 - No custom input pins
 - No per-plugin secret ACLs
@@ -63,7 +63,7 @@ Notes:
 
 - Relative `executable` paths are resolved relative to the directory that contains `plugin.json`.
 - Hidden directories under the plugin root are skipped while discovering manifests.
-- Plugins are loaded when Emerald starts. After changing a plugin manifest or binary, restart Emerald to pick it up again.
+- Plugins are loaded when Emerald starts. After changing a plugin manifest or binary, restart Emerald or use `Settings -> Rediscover Plugins`.
 
 ## `plugin.json`
 
@@ -130,6 +130,8 @@ At startup, Emerald:
 
 If a plugin fails to load, its nodes become unavailable and pipelines using them cannot run until the plugin resolves again.
 
+For trigger plugins, Emerald also keeps one long-lived runtime stream per plugin and pushes full active subscription snapshots through it.
+
 ## Main SDK Types
 
 The main packages are:
@@ -142,6 +144,8 @@ The most important types are:
 - `pluginapi.Plugin`
 - `pluginapi.Bundle`
 - `pluginapi.NodeSpec`
+- `pluginapi.TriggerNode`
+- `pluginapi.TriggerRuntime`
 - `pluginapi.FieldSpec`
 - `pluginapi.OutputHandle`
 - `pluginapi.OutputHint`
@@ -325,6 +329,48 @@ In practice:
 
 If your tool definition depends on templated values, keep that behavior simple and test it carefully.
 
+## Trigger Nodes
+
+Trigger nodes implement:
+
+```go
+ValidateConfig(ctx context.Context, config json.RawMessage) error
+```
+
+Trigger plugins do not execute pipeline steps directly. Instead:
+
+1. Emerald sends the plugin a full `TriggerSubscriptionSnapshot` for the active configured trigger set owned by that plugin.
+2. The plugin watches its external source and emits `TriggerEvent` values back to Emerald.
+3. Emerald starts the exact subscribed root node and wraps the emitted payload as that trigger node's output.
+
+Each subscription includes:
+
+- `subscription_id` - stable runtime key for this active trigger instance
+- `pipeline_id` - owning pipeline
+- `node_type` - resolved type such as `trigger:plugin/acme/inbox`
+- `node_id` - plugin node ID such as `inbox`
+- `node_instance_id` - concrete node ID inside the pipeline graph
+- `config` - saved node config JSON for that node instance
+
+At runtime, Emerald exposes the emitted event as normal trigger output. It also adds:
+
+- `triggered_by = "plugin"`
+- `subscription_id`
+- `payload`
+
+If the payload is an object, Emerald also flattens its top-level keys onto the trigger output for easier downstream templating.
+
+## Trigger Runtime Stream
+
+Trigger plugins expose their runtime stream through `OpenTriggerRuntime`.
+
+Practical guidance:
+
+- Treat each snapshot as authoritative replacement state, not an incremental patch.
+- Rebuild or refresh your in-plugin watchers when the snapshot changes.
+- Emit only JSON-compatible payloads.
+- Include enough payload fields that downstream actions can template without extra unpacking.
+
 ## Secrets
 
 Emerald has a global encrypted secret store. Secret values are available at runtime through the reserved `secret` object:
@@ -359,6 +405,17 @@ It demonstrates:
 - output hints
 - plugin bundle structure
 
+The repository also includes a trigger-focused reference plugin at:
+
+[`examples/plugins/sample-trigger-kit`](/H:/Projects/Go/src/github.com/FlameInTheDark/emerald/examples/plugins/sample-trigger-kit)
+
+It demonstrates:
+
+- a plugin-defined trigger node
+- trigger runtime subscription snapshots
+- emitted trigger events with JSON payloads
+- downstream-friendly trigger output fields
+
 Build it from the repository root:
 
 ```powershell
@@ -382,6 +439,7 @@ After restarting Emerald, you should see the plugin nodes in the normal `Actions
 - Prefer explicit output field names over deeply nested ad hoc payloads.
 - Use any Lucide icon name for `NodeSpec.Icon`. Kebab-case names such as `globe`, `database`, `server`, `cloud`, or `message-square` are the clearest choice.
 - Build one action node first, get it working in the editor, then add tool nodes and custom outputs.
+- For trigger plugins, start with one subscription type and make snapshot replacement logic explicit before you add more external sources.
 
 ## Troubleshooting
 

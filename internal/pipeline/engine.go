@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/FlameInTheDark/emerald/internal/node"
-	"github.com/FlameInTheDark/emerald/internal/node/trigger"
 )
 
 type FlowNode struct {
@@ -35,6 +34,7 @@ type FlowData struct {
 type ExecutionState struct {
 	PipelineID   string
 	TriggerType  string
+	RootNodeIDs  []string
 	Context      map[string]any
 	NodeResults  map[string]*node.NodeResult
 	NodeRuns     []NodeRun
@@ -85,13 +85,19 @@ func (e *Engine) Execute(ctx context.Context, flowData FlowData, triggerType str
 }
 
 func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, triggerType string, executionContext map[string]any, observers ...*ExecutionObserver) (*ExecutionState, error) {
+	return e.ExecuteWithSelection(ctx, flowData, TriggerSelection{TriggerType: triggerType}, executionContext, observers...)
+}
+
+func (e *Engine) ExecuteWithSelection(ctx context.Context, flowData FlowData, selection TriggerSelection, executionContext map[string]any, observers ...*ExecutionObserver) (*ExecutionState, error) {
 	var observer *ExecutionObserver
 	if len(observers) > 0 {
 		observer = observers[0]
 	}
 
+	resolvedSelection := ResolveTriggerSelection(ctx, flowData, selection)
 	state := &ExecutionState{
-		TriggerType: triggerType,
+		TriggerType: resolvedSelection.TriggerType,
+		RootNodeIDs: append([]string(nil), resolvedSelection.RootNodeIDs...),
 		Context:     copyExecutionContext(executionContext),
 		NodeResults: make(map[string]*node.NodeResult),
 		NodeRuns:    make([]NodeRun, 0, len(flowData.Nodes)),
@@ -100,12 +106,15 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 
 	nodeMap := make(map[string]FlowNode)
 	adjacency := make(map[string][]FlowEdge)
-	inDegree := make(map[string]int)
 	toolTargets := collectToolTargets(flowData.Edges)
+	activeNodes := ReachableNodeIDs(flowData, resolvedSelection.RootNodeIDs)
+	pendingIncoming := make(map[string]int, len(activeNodes))
 
 	for _, n := range flowData.Nodes {
 		nodeMap[n.ID] = n
-		inDegree[n.ID] = 0
+		if _, ok := activeNodes[n.ID]; ok {
+			pendingIncoming[n.ID] = 0
+		}
 	}
 
 	for _, edge := range flowData.Edges {
@@ -113,7 +122,13 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 			continue
 		}
 		adjacency[edge.Source] = append(adjacency[edge.Source], edge)
-		inDegree[edge.Target]++
+		if _, sourceActive := activeNodes[edge.Source]; !sourceActive {
+			continue
+		}
+		if _, targetActive := activeNodes[edge.Target]; !targetActive {
+			continue
+		}
+		pendingIncoming[edge.Target]++
 	}
 
 	runtime := &ExecutionRuntime{
@@ -125,7 +140,7 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 	}
 	ctx = withExecutionRuntime(ctx, runtime)
 
-	queue := e.buildInitialQueue(ctx, nodeMap, inDegree, triggerType, toolTargets)
+	queue := e.buildInitialQueue(resolvedSelection, nodeMap, activeNodes, pendingIncoming, toolTargets)
 
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -168,7 +183,7 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 
 			e.recordNodeRun(state, currentID, string(nodeType), input, result, startedAt, time.Now(), observer)
 			if continued {
-				queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routingDecision{}, inDegree)
+				queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routingDecision{}, activeNodes, pendingIncoming)
 				continue
 			}
 
@@ -188,7 +203,7 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 
 			e.recordNodeRun(state, currentID, string(nodeType), input, result, startedAt, completedAt, observer)
 			if continued {
-				queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routingDecision{}, inDegree)
+				queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routingDecision{}, activeNodes, pendingIncoming)
 				continue
 			}
 
@@ -208,7 +223,7 @@ func (e *Engine) ExecuteWithInput(ctx context.Context, flowData FlowData, trigge
 		}
 
 		routing := e.extractRoutingDecision(result)
-		queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routing, inDegree)
+		queue = e.enqueueOutgoingEdges(queue, adjacency[currentID], routing, activeNodes, pendingIncoming)
 	}
 
 	return state, nil
@@ -348,47 +363,40 @@ func (e *Engine) buildInput(nodeID string, edges []FlowEdge, state *ExecutionSta
 	return input
 }
 
-func (e *Engine) buildInitialQueue(ctx context.Context, nodeMap map[string]FlowNode, inDegree map[string]int, triggerType string, toolTargets map[string]struct{}) []string {
-	queue := make([]string, 0, len(inDegree))
-	rootIDs := make([]string, 0, len(inDegree))
-	hasRootTrigger := false
-
-	for id, degree := range inDegree {
-		if degree != 0 {
+func (e *Engine) buildInitialQueue(selection TriggerSelection, nodeMap map[string]FlowNode, activeNodes map[string]struct{}, pendingIncoming map[string]int, toolTargets map[string]struct{}) []string {
+	queue := make([]string, 0, len(selection.RootNodeIDs))
+	for _, nodeID := range selection.RootNodeIDs {
+		if _, ok := activeNodes[nodeID]; !ok {
 			continue
 		}
-		if _, isToolNode := toolTargets[id]; isToolNode {
+		if _, isToolNode := toolTargets[nodeID]; isToolNode {
+			continue
+		}
+		if pendingIncoming[nodeID] != 0 {
 			continue
 		}
 
-		flowNode := nodeMap[id]
-		nodeType, config := decodeNodeTypeAndConfig(flowNode)
+		flowNode, ok := nodeMap[nodeID]
+		if !ok {
+			continue
+		}
+		nodeType, _ := decodeNodeTypeAndConfig(flowNode)
 		if isToolNodeType(nodeType) || isVisualNodeType(nodeType) {
 			continue
 		}
 
-		rootIDs = append(rootIDs, id)
-		if trigger.IsTriggerType(nodeType) {
-			hasRootTrigger = true
-			if trigger.MatchesExecution(ctx, nodeType, config, triggerType) {
-				queue = append(queue, id)
-			}
-		}
+		queue = append(queue, nodeID)
 	}
 
-	if hasRootTrigger {
-		return queue
-	}
-
-	if triggerType != "manual" {
-		return nil
-	}
-
-	return rootIDs
+	return queue
 }
 
-func (e *Engine) enqueueOutgoingEdges(queue []string, edges []FlowEdge, routing routingDecision, inDegree map[string]int) []string {
+func (e *Engine) enqueueOutgoingEdges(queue []string, edges []FlowEdge, routing routingDecision, activeNodes map[string]struct{}, pendingIncoming map[string]int) []string {
 	for _, edge := range edges {
+		if _, ok := activeNodes[edge.Target]; !ok {
+			continue
+		}
+
 		if routing.condition != nil {
 			if !edgeMatchesCondition(edge, *routing.condition) {
 				continue
@@ -401,8 +409,8 @@ func (e *Engine) enqueueOutgoingEdges(queue []string, edges []FlowEdge, routing 
 			}
 		}
 
-		inDegree[edge.Target]--
-		if inDegree[edge.Target] == 0 {
+		pendingIncoming[edge.Target]--
+		if pendingIncoming[edge.Target] == 0 {
 			queue = append(queue, edge.Target)
 		}
 	}

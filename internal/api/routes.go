@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -26,6 +27,7 @@ import (
 	"github.com/FlameInTheDark/emerald/internal/shellcmd"
 	"github.com/FlameInTheDark/emerald/internal/skills"
 	"github.com/FlameInTheDark/emerald/internal/templateops"
+	"github.com/FlameInTheDark/emerald/internal/triggers"
 	"github.com/FlameInTheDark/emerald/internal/ws"
 )
 
@@ -44,6 +46,7 @@ type Config struct {
 	AuthService     *auth.Service
 	NodeDefinitions *nodedefs.Service
 	SecretStore     *query.SecretStore
+	TriggerService  *triggers.Service
 }
 
 func New(cfg Config) *fiber.App {
@@ -105,18 +108,30 @@ func New(cfg Config) *fiber.App {
 	if nodeDefinitionService == nil {
 		nodeDefinitionService = nodedefs.NewService(nil)
 	}
-	nodeDefinitionsHandler := handlers.NewNodeDefinitionsHandler(nodeDefinitionService)
+	nodeDefinitionsHandler := handlers.NewNodeDefinitionsHandler(nodeDefinitionService, cfg.TriggerService)
 	llmProviderHandler := handlers.NewLLMProviderHandler(llmProviderStore)
 	dashboardHandler := handlers.NewDashboardHandler(clusterStore, pipelineStore, executionStore, channelStore, cfg.Scheduler)
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userStore, authService)
-	pipelineService := pipelineops.NewService(pipelineStore, cfg.Scheduler, nodeDefinitionService)
+	var pipelineReloader interface {
+		Reload(ctx context.Context) error
+	}
+	if cfg.TriggerService != nil {
+		pipelineReloader = cfg.TriggerService
+	} else if cfg.Scheduler != nil {
+		pipelineReloader = cfg.Scheduler
+	}
+	pipelineService := pipelineops.NewService(pipelineStore, pipelineReloader, nodeDefinitionService)
+	if cfg.TriggerService != nil {
+		pipelineService.SetActivationValidator(cfg.TriggerService)
+	}
 	templateHandler := handlers.NewTemplateHandler(templateops.NewService(templateStore, pipelineService, nodeDefinitionService))
 
 	pipelineRunHandler := handlers.NewPipelineRunHandler(
 		pipelineStore,
 		cfg.ExecutionRunner,
 	)
+	webhookHandler := handlers.NewWebhookHandler(cfg.TriggerService)
 	llmChatHandler := handlers.NewLLMChatHandler(llmProviderStore, clusterStore, kubernetesClusterStore, pipelineStore, chatStore, cfg.ExecutionRunner, cfg.Scheduler, cfg.SkillStore, cfg.ShellRunner, assistantProfileStore)
 	editorAssistantHandler := handlers.NewEditorAssistantHandler(llmProviderStore, assistantProfileStore, cfg.SkillStore, nodeDefinitionService)
 	assistantProfileHandler := handlers.NewAssistantProfileHandler(assistantProfileStore)
@@ -130,6 +145,9 @@ func New(cfg Config) *fiber.App {
 	api.Post("/auth/login", authHandler.Login)
 	api.Get("/auth/session", authHandler.Session)
 	api.Post("/auth/logout", authHandler.Logout)
+
+	app.All("/webhook", webhookHandler.Handle)
+	app.All("/webhook/*", webhookHandler.Handle)
 
 	api.Post("/channels/connect", channelHandler.Connect)
 	api.Use(authMiddleware(authService))
@@ -161,7 +179,10 @@ func New(cfg Config) *fiber.App {
 	channelRoutes.Delete("/:id", channelHandler.Delete)
 	channelRoutes.Get("/:id/contacts", channelHandler.ListContacts)
 
-	pipelineHandler := pipelineHandler(pipelineStore, cfg.Scheduler, nodeDefinitionService)
+	pipelineHandler := handlers.NewPipelineHandler(pipelineStore, pipelineReloader, nodeDefinitionService)
+	if cfg.TriggerService != nil {
+		pipelineHandler.SetActivationValidator(cfg.TriggerService)
+	}
 	pipelines := api.Group("/pipelines")
 	pipelines.Get("/", pipelineHandler.List)
 	pipelines.Post("/", pipelineHandler.Create)
@@ -230,11 +251,6 @@ func New(cfg Config) *fiber.App {
 
 	return app
 }
-
-func pipelineHandler(store *query.PipelineStore, scheduler *scheduler.Scheduler, validator *nodedefs.Service) *handlers.PipelineHandler {
-	return handlers.NewPipelineHandler(store, scheduler, validator)
-}
-
 func serveEmbedded() fiber.Handler {
 	embedded, err := fs.Sub(embeddedFS, "web/dist")
 	if err != nil {

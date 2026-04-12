@@ -45,6 +45,40 @@ describe('nodeTypes helpers', () => {
     expect(actionCategory?.types.some((type) => type.type === 'action:plugin/acme/request')).toBe(true)
   })
 
+  it('adds trigger plugin definitions to the trigger catalog', () => {
+    const catalog = buildNodeCatalog([
+      {
+        type: 'trigger:plugin/acme/inbox',
+        category: 'trigger',
+        source: 'plugin',
+        plugin_id: 'acme',
+        plugin_name: 'Acme Toolkit',
+        label: 'Inbox Event',
+        description: 'Subscribe to Acme inbox events',
+        icon: 'bell',
+        color: '#f59e0b',
+        menu_path: ['Acme'],
+        default_config: { mailbox: 'support' },
+        fields: [],
+        outputs: [],
+        output_hints: [],
+      },
+    ])
+
+    const definition = catalog.map['trigger:plugin/acme/inbox']
+    expect(definition).toMatchObject({
+      type: 'trigger:plugin/acme/inbox',
+      category: 'trigger',
+      pluginId: 'acme',
+      pluginName: 'Acme Toolkit',
+      label: 'Inbox Event',
+      menuPath: ['Acme'],
+    })
+
+    const triggerCategory = catalog.categories.find((category) => category.id === 'trigger')
+    expect(triggerCategory?.types.some((type) => type.type === 'trigger:plugin/acme/inbox')).toBe(true)
+  })
+
   it('builds nested menu categories from menu paths', () => {
     const catalog = buildNodeCatalog([
       {
@@ -102,5 +136,14 @@ describe('nodeTypes helpers', () => {
     )
     expect(analyticsGroup?.types.map((type) => type.type)).toContain('logic:summarize')
     expect(generalActionGroup?.types.map((type) => type.type)).toContain('action:lua')
+  })
+
+  it('exposes a visible default token field for webhook triggers', () => {
+    const catalog = buildNodeCatalog()
+    expect(catalog.map['trigger:webhook']?.defaultConfig).toEqual({
+      path: '',
+      method: 'POST',
+      token: '',
+    })
   })
 })

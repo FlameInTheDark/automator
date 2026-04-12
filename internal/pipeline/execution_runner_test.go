@@ -206,7 +206,7 @@ func TestExecutionRunner_CancelTracksActiveExecution(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		result, err := runner.Run(context.Background(), "pipeline-1", flowData, "manual", nil)
+		result, err := runner.Run(context.Background(), "pipeline-1", flowData, TriggerSelection{TriggerType: "manual"}, nil)
 		resultCh <- result
 		errCh <- err
 	}()
@@ -317,7 +317,7 @@ func TestExecutionRunner_ContinuedNodeErrorKeepsExecutionCompleted(t *testing.T)
 		},
 	}
 
-	result, err := runner.Run(context.Background(), "pipeline-1", flowData, "manual", map[string]any{"requestId": "req-1"})
+	result, err := runner.Run(context.Background(), "pipeline-1", flowData, TriggerSelection{TriggerType: "manual"}, map[string]any{"requestId": "req-1"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -397,7 +397,7 @@ func TestExecutionRunner_RuntimeSecretsOverrideReservedContextWithoutPersistingV
 		},
 	}
 
-	result, err := runner.Run(context.Background(), "pipeline-1", flowData, "manual", map[string]any{
+	result, err := runner.Run(context.Background(), "pipeline-1", flowData, TriggerSelection{TriggerType: "manual"}, map[string]any{
 		"requestId": "req-1",
 		"secret": map[string]any{
 			"db_password": "user-supplied",
@@ -467,7 +467,7 @@ func TestExecutionRunner_BroadcastsNodeInputOnStartAndCompletion(t *testing.T) {
 		},
 	}
 
-	if _, err := runner.Run(context.Background(), "pipeline-1", flowData, "manual", map[string]any{
+	if _, err := runner.Run(context.Background(), "pipeline-1", flowData, TriggerSelection{TriggerType: "manual"}, map[string]any{
 		"requestId": "req-1",
 		"count":     3,
 	}); err != nil {

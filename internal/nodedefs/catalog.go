@@ -19,7 +19,7 @@ func BuiltinDefinitions() []Definition {
 	return []Definition{
 		builtin("trigger:manual", "trigger", "Manual Trigger", "Start pipeline manually", "zap", colorTrigger, map[string]any{}),
 		builtin("trigger:cron", "trigger", "Cron Trigger", "Schedule pipeline with cron expression", "clock", colorTrigger, map[string]any{"schedule": "0 * * * *", "timezone": "UTC"}),
-		builtin("trigger:webhook", "trigger", "Webhook Trigger", "Trigger pipeline via HTTP webhook", "webhook", colorTrigger, map[string]any{"path": "", "method": "POST"}),
+		builtin("trigger:webhook", "trigger", "Webhook Trigger", "Trigger pipeline via HTTP webhook", "webhook", colorTrigger, map[string]any{"path": "", "method": "POST", "token": ""}),
 		builtin("trigger:channel_message", "trigger", "Channel Message", "Trigger when a connected channel user sends a message", "message-square", colorTrigger, map[string]any{"channelId": ""}),
 
 		builtin("action:proxmox_list_nodes", "action", "List Nodes", "List nodes in a selected Proxmox cluster", "globe", colorAction, map[string]any{"clusterId": ""}),

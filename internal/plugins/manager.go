@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	actionTypePrefix = "action:plugin/"
-	toolTypePrefix   = "tool:plugin/"
+	actionTypePrefix  = "action:plugin/"
+	triggerTypePrefix = "trigger:plugin/"
+	toolTypePrefix    = "tool:plugin/"
 )
 
 type BundleStatus struct {
@@ -283,6 +284,45 @@ func (m *Manager) ExecuteTool(ctx context.Context, nodeType string, config json.
 	return runtime.plugin.ExecuteTool(ctx, nodeID, normalizeConfigPayload(config), normalizeConfigPayload(args), copyInput(input))
 }
 
+func (m *Manager) OpenTriggerRuntime(ctx context.Context, pluginID string) (pluginapi.TriggerRuntime, func(), error) {
+	if m == nil {
+		return nil, nil, fmt.Errorf("plugin manager is not configured")
+	}
+
+	trimmedPluginID := strings.TrimSpace(pluginID)
+
+	m.mu.RLock()
+	runtime := m.bundles[trimmedPluginID]
+	m.mu.RUnlock()
+
+	if runtime == nil || runtime.plugin == nil {
+		return nil, nil, fmt.Errorf("plugin %q is unavailable", trimmedPluginID)
+	}
+	if runtime.error != nil {
+		return nil, nil, runtime.error
+	}
+
+	runtime.refs.Add(1)
+
+	triggerRuntime, err := runtime.plugin.OpenTriggerRuntime(ctx)
+	if err != nil {
+		runtime.refs.Done()
+		return nil, nil, err
+	}
+
+	released := false
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		_ = triggerRuntime.Close()
+		runtime.refs.Done()
+	}
+
+	return triggerRuntime, release, nil
+}
+
 func (m *Manager) resolve(nodeType string) (*bundleRuntime, NodeBinding, string, func(), error) {
 	kind, pluginID, nodeID, ok := ParseNodeType(nodeType)
 	if !ok {
@@ -384,7 +424,7 @@ func startRuntime(ctx context.Context, manifest Manifest) (*bundleRuntime, []Nod
 		}
 		seenNodeIDs[spec.ID] = struct{}{}
 
-		if spec.Kind != pluginapi.NodeKindAction && spec.Kind != pluginapi.NodeKindTool {
+		if spec.Kind != pluginapi.NodeKindAction && spec.Kind != pluginapi.NodeKindTool && spec.Kind != pluginapi.NodeKindTrigger {
 			client.Kill()
 			return nil, nil, fmt.Errorf("plugin %s node %q uses unsupported kind %q", manifest.ID, spec.ID, spec.Kind)
 		}
@@ -437,6 +477,8 @@ func BuildNodeType(kind pluginapi.NodeKind, pluginID string, nodeID string) stri
 	nodeID = strings.TrimSpace(nodeID)
 
 	switch kind {
+	case pluginapi.NodeKindTrigger:
+		return triggerTypePrefix + pluginID + "/" + nodeID
 	case pluginapi.NodeKindTool:
 		return toolTypePrefix + pluginID + "/" + nodeID
 	default:
@@ -450,6 +492,10 @@ func ParseNodeType(nodeType string) (pluginapi.NodeKind, string, string, bool) {
 	if strings.HasPrefix(trimmed, actionTypePrefix) {
 		pluginID, nodeID, ok := splitPluginPath(strings.TrimPrefix(trimmed, actionTypePrefix))
 		return pluginapi.NodeKindAction, pluginID, nodeID, ok
+	}
+	if strings.HasPrefix(trimmed, triggerTypePrefix) {
+		pluginID, nodeID, ok := splitPluginPath(strings.TrimPrefix(trimmed, triggerTypePrefix))
+		return pluginapi.NodeKindTrigger, pluginID, nodeID, ok
 	}
 	if strings.HasPrefix(trimmed, toolTypePrefix) {
 		pluginID, nodeID, ok := splitPluginPath(strings.TrimPrefix(trimmed, toolTypePrefix))

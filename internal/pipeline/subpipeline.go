@@ -86,7 +86,7 @@ func (i *Invoker) Run(ctx context.Context, pipelineID string, input map[string]a
 
 	ctx = WithPipelineCall(ctx, pipelineID)
 	if i.runner != nil {
-		result, err := i.runner.Run(ctx, pipelineID, *flowData, "manual", copyExecutionContext(input))
+		result, err := i.runner.Run(ctx, pipelineID, *flowData, TriggerSelection{TriggerType: "manual"}, copyExecutionContext(input))
 		if err != nil {
 			return nil, err
 		}

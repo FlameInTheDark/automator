@@ -1,0 +1,7 @@
+{
+  "id": "sample-trigger-kit",
+  "name": "Sample Trigger Kit",
+  "version": "0.1.0",
+  "description": "Reference plugin bundle with one trigger node powered by the trigger runtime stream.",
+  "executable": "./bin/sample-trigger-kit.exe"
+}

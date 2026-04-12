@@ -54,7 +54,7 @@ func (h *PipelineRunHandler) Run(c *fiber.Ctx) error {
 		})
 	}
 
-	result, err := h.runner.Run(context.Background(), p.ID, flowData, "manual", nil)
+	result, err := h.runner.Run(context.Background(), p.ID, flowData, pipeline.TriggerSelection{TriggerType: "manual"}, nil)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -180,7 +180,7 @@ func (r *chatPipelineRunner) Run(ctx context.Context, pipelineID string, input m
 		return nil, err
 	}
 
-	result, err := r.runner.Run(ctx, pipelineModel.ID, *flowData, "manual", copyToolExecutionInput(input))
+	result, err := r.runner.Run(ctx, pipelineModel.ID, *flowData, pipeline.TriggerSelection{TriggerType: "manual"}, copyToolExecutionInput(input))
 	if err != nil {
 		return nil, err
 	}

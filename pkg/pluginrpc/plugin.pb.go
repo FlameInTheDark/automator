@@ -509,6 +509,94 @@ func (x *ExecuteToolResponse) GetResultJson() []byte {
 	return nil
 }
 
+type TriggerRuntimeClientMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SnapshotJson  []byte                 `protobuf:"bytes,1,opt,name=snapshot_json,json=snapshotJson,proto3" json:"snapshot_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TriggerRuntimeClientMessage) Reset() {
+	*x = TriggerRuntimeClientMessage{}
+	mi := &file_pkg_pluginrpc_plugin_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TriggerRuntimeClientMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TriggerRuntimeClientMessage) ProtoMessage() {}
+
+func (x *TriggerRuntimeClientMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_pluginrpc_plugin_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TriggerRuntimeClientMessage.ProtoReflect.Descriptor instead.
+func (*TriggerRuntimeClientMessage) Descriptor() ([]byte, []int) {
+	return file_pkg_pluginrpc_plugin_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TriggerRuntimeClientMessage) GetSnapshotJson() []byte {
+	if x != nil {
+		return x.SnapshotJson
+	}
+	return nil
+}
+
+type TriggerRuntimeServerMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventJson     []byte                 `protobuf:"bytes,1,opt,name=event_json,json=eventJson,proto3" json:"event_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TriggerRuntimeServerMessage) Reset() {
+	*x = TriggerRuntimeServerMessage{}
+	mi := &file_pkg_pluginrpc_plugin_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TriggerRuntimeServerMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TriggerRuntimeServerMessage) ProtoMessage() {}
+
+func (x *TriggerRuntimeServerMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_pluginrpc_plugin_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TriggerRuntimeServerMessage.ProtoReflect.Descriptor instead.
+func (*TriggerRuntimeServerMessage) Descriptor() ([]byte, []int) {
+	return file_pkg_pluginrpc_plugin_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *TriggerRuntimeServerMessage) GetEventJson() []byte {
+	if x != nil {
+		return x.EventJson
+	}
+	return nil
+}
+
 var File_pkg_pluginrpc_plugin_proto protoreflect.FileDescriptor
 
 const file_pkg_pluginrpc_plugin_proto_rawDesc = "" +
@@ -547,13 +635,19 @@ const file_pkg_pluginrpc_plugin_proto_rawDesc = "" +
 	"input_json\x18\x04 \x01(\fR\tinputJson\"6\n" +
 	"\x13ExecuteToolResponse\x12\x1f\n" +
 	"\vresult_json\x18\x01 \x01(\fR\n" +
-	"resultJson2\xa4\x03\n" +
+	"resultJson\"B\n" +
+	"\x1bTriggerRuntimeClientMessage\x12#\n" +
+	"\rsnapshot_json\x18\x01 \x01(\fR\fsnapshotJson\"<\n" +
+	"\x1bTriggerRuntimeServerMessage\x12\x1d\n" +
+	"\n" +
+	"event_json\x18\x01 \x01(\fR\teventJson2\x8a\x04\n" +
 	"\rEmeraldPlugin\x12C\n" +
 	"\bDescribe\x12\x1a.pluginrpc.DescribeRequest\x1a\x1b.pluginrpc.DescribeResponse\x12U\n" +
 	"\x0eValidateConfig\x12 .pluginrpc.ValidateConfigRequest\x1a!.pluginrpc.ValidateConfigResponse\x12R\n" +
 	"\rExecuteAction\x12\x1f.pluginrpc.ExecuteActionRequest\x1a .pluginrpc.ExecuteActionResponse\x12U\n" +
 	"\x0eToolDefinition\x12 .pluginrpc.ToolDefinitionRequest\x1a!.pluginrpc.ToolDefinitionResponse\x12L\n" +
-	"\vExecuteTool\x12\x1d.pluginrpc.ExecuteToolRequest\x1a\x1e.pluginrpc.ExecuteToolResponseB;Z9github.com/FlameInTheDark/emerald/pkg/pluginrpc;pluginrpcb\x06proto3"
+	"\vExecuteTool\x12\x1d.pluginrpc.ExecuteToolRequest\x1a\x1e.pluginrpc.ExecuteToolResponse\x12d\n" +
+	"\x0eTriggerRuntime\x12&.pluginrpc.TriggerRuntimeClientMessage\x1a&.pluginrpc.TriggerRuntimeServerMessage(\x010\x01B;Z9github.com/FlameInTheDark/emerald/pkg/pluginrpc;pluginrpcb\x06proto3"
 
 var (
 	file_pkg_pluginrpc_plugin_proto_rawDescOnce sync.Once
@@ -567,35 +661,39 @@ func file_pkg_pluginrpc_plugin_proto_rawDescGZIP() []byte {
 	return file_pkg_pluginrpc_plugin_proto_rawDescData
 }
 
-var file_pkg_pluginrpc_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_pkg_pluginrpc_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_pkg_pluginrpc_plugin_proto_goTypes = []any{
-	(*DescribeRequest)(nil),        // 0: pluginrpc.DescribeRequest
-	(*DescribeResponse)(nil),       // 1: pluginrpc.DescribeResponse
-	(*ValidateConfigRequest)(nil),  // 2: pluginrpc.ValidateConfigRequest
-	(*ValidateConfigResponse)(nil), // 3: pluginrpc.ValidateConfigResponse
-	(*ExecuteActionRequest)(nil),   // 4: pluginrpc.ExecuteActionRequest
-	(*ExecuteActionResponse)(nil),  // 5: pluginrpc.ExecuteActionResponse
-	(*ToolDefinitionRequest)(nil),  // 6: pluginrpc.ToolDefinitionRequest
-	(*ToolDefinitionResponse)(nil), // 7: pluginrpc.ToolDefinitionResponse
-	(*ExecuteToolRequest)(nil),     // 8: pluginrpc.ExecuteToolRequest
-	(*ExecuteToolResponse)(nil),    // 9: pluginrpc.ExecuteToolResponse
+	(*DescribeRequest)(nil),             // 0: pluginrpc.DescribeRequest
+	(*DescribeResponse)(nil),            // 1: pluginrpc.DescribeResponse
+	(*ValidateConfigRequest)(nil),       // 2: pluginrpc.ValidateConfigRequest
+	(*ValidateConfigResponse)(nil),      // 3: pluginrpc.ValidateConfigResponse
+	(*ExecuteActionRequest)(nil),        // 4: pluginrpc.ExecuteActionRequest
+	(*ExecuteActionResponse)(nil),       // 5: pluginrpc.ExecuteActionResponse
+	(*ToolDefinitionRequest)(nil),       // 6: pluginrpc.ToolDefinitionRequest
+	(*ToolDefinitionResponse)(nil),      // 7: pluginrpc.ToolDefinitionResponse
+	(*ExecuteToolRequest)(nil),          // 8: pluginrpc.ExecuteToolRequest
+	(*ExecuteToolResponse)(nil),         // 9: pluginrpc.ExecuteToolResponse
+	(*TriggerRuntimeClientMessage)(nil), // 10: pluginrpc.TriggerRuntimeClientMessage
+	(*TriggerRuntimeServerMessage)(nil), // 11: pluginrpc.TriggerRuntimeServerMessage
 }
 var file_pkg_pluginrpc_plugin_proto_depIdxs = []int32{
-	0, // 0: pluginrpc.EmeraldPlugin.Describe:input_type -> pluginrpc.DescribeRequest
-	2, // 1: pluginrpc.EmeraldPlugin.ValidateConfig:input_type -> pluginrpc.ValidateConfigRequest
-	4, // 2: pluginrpc.EmeraldPlugin.ExecuteAction:input_type -> pluginrpc.ExecuteActionRequest
-	6, // 3: pluginrpc.EmeraldPlugin.ToolDefinition:input_type -> pluginrpc.ToolDefinitionRequest
-	8, // 4: pluginrpc.EmeraldPlugin.ExecuteTool:input_type -> pluginrpc.ExecuteToolRequest
-	1, // 5: pluginrpc.EmeraldPlugin.Describe:output_type -> pluginrpc.DescribeResponse
-	3, // 6: pluginrpc.EmeraldPlugin.ValidateConfig:output_type -> pluginrpc.ValidateConfigResponse
-	5, // 7: pluginrpc.EmeraldPlugin.ExecuteAction:output_type -> pluginrpc.ExecuteActionResponse
-	7, // 8: pluginrpc.EmeraldPlugin.ToolDefinition:output_type -> pluginrpc.ToolDefinitionResponse
-	9, // 9: pluginrpc.EmeraldPlugin.ExecuteTool:output_type -> pluginrpc.ExecuteToolResponse
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: pluginrpc.EmeraldPlugin.Describe:input_type -> pluginrpc.DescribeRequest
+	2,  // 1: pluginrpc.EmeraldPlugin.ValidateConfig:input_type -> pluginrpc.ValidateConfigRequest
+	4,  // 2: pluginrpc.EmeraldPlugin.ExecuteAction:input_type -> pluginrpc.ExecuteActionRequest
+	6,  // 3: pluginrpc.EmeraldPlugin.ToolDefinition:input_type -> pluginrpc.ToolDefinitionRequest
+	8,  // 4: pluginrpc.EmeraldPlugin.ExecuteTool:input_type -> pluginrpc.ExecuteToolRequest
+	10, // 5: pluginrpc.EmeraldPlugin.TriggerRuntime:input_type -> pluginrpc.TriggerRuntimeClientMessage
+	1,  // 6: pluginrpc.EmeraldPlugin.Describe:output_type -> pluginrpc.DescribeResponse
+	3,  // 7: pluginrpc.EmeraldPlugin.ValidateConfig:output_type -> pluginrpc.ValidateConfigResponse
+	5,  // 8: pluginrpc.EmeraldPlugin.ExecuteAction:output_type -> pluginrpc.ExecuteActionResponse
+	7,  // 9: pluginrpc.EmeraldPlugin.ToolDefinition:output_type -> pluginrpc.ToolDefinitionResponse
+	9,  // 10: pluginrpc.EmeraldPlugin.ExecuteTool:output_type -> pluginrpc.ExecuteToolResponse
+	11, // 11: pluginrpc.EmeraldPlugin.TriggerRuntime:output_type -> pluginrpc.TriggerRuntimeServerMessage
+	6,  // [6:12] is the sub-list for method output_type
+	0,  // [0:6] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_pkg_pluginrpc_plugin_proto_init() }
@@ -609,7 +707,7 @@ func file_pkg_pluginrpc_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_pluginrpc_plugin_proto_rawDesc), len(file_pkg_pluginrpc_plugin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

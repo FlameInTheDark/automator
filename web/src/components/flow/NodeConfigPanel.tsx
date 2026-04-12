@@ -2045,7 +2045,9 @@ export default function NodeConfigPanel({
                   </div>
                 </div>
               </>
-            ) : resolvedNodeType.startsWith('action:plugin/') || resolvedNodeType.startsWith('tool:plugin/') ? (
+            ) : resolvedNodeType.startsWith('action:plugin/')
+              || resolvedNodeType.startsWith('tool:plugin/')
+              || resolvedNodeType.startsWith('trigger:plugin/') ? (
               nodeDef ? (
                 <div className="space-y-4">
                   {nodeDef.pluginName && (
@@ -2191,9 +2193,35 @@ export default function NodeConfigPanel({
                     onChange={(e) => handleConfigChange('method', e.target.value)}
                     className="w-full px-3 py-2 bg-bg-input border border-border rounded-lg text-text text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent"
                   >
-                    <option value="POST">POST</option>
                     <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="PATCH">PATCH</option>
+                    <option value="DELETE">DELETE</option>
+                    <option value="HEAD">HEAD</option>
+                    <option value="OPTIONS">OPTIONS</option>
                   </select>
+                </div>
+                <div>
+                  <Label>Token</Label>
+                  <TemplateInput
+                    value={(localConfig.token as string) || ''}
+                    onChange={(e) => handleConfigChange('token', e.target.value)}
+                    placeholder="Optional shared secret"
+                    suggestions={templateSuggestions}
+                  />
+                  <p className="mt-1 text-xs text-text-dimmed">
+                    Leave empty to keep the webhook public. Requests can send the token with
+                    {' '}
+                    <span className="font-mono text-text">X-Emerald-Webhook-Token</span>
+                    ,
+                    {' '}
+                    <span className="font-mono text-text">Authorization: Bearer ...</span>
+                    , or
+                    {' '}
+                    <span className="font-mono text-text">?token=...</span>
+                    .
+                  </p>
                 </div>
               </>
             ) : (

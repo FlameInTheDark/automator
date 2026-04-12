@@ -8,26 +8,41 @@ import (
 	"github.com/FlameInTheDark/emerald/internal/db/models"
 	"github.com/FlameInTheDark/emerald/internal/db/query"
 	"github.com/FlameInTheDark/emerald/internal/pipelineops"
-	"github.com/FlameInTheDark/emerald/internal/scheduler"
 	"github.com/FlameInTheDark/emerald/internal/templateops"
 )
 
 type PipelineHandler struct {
-	store     *query.PipelineStore
-	scheduler *scheduler.Scheduler
-	validator definitionValidator
+	store               *query.PipelineStore
+	reloader            reloader
+	validator           definitionValidator
+	activationValidator activationValidator
 }
 
 type definitionValidator interface {
 	ValidateDefinition(ctx context.Context, nodesJSON string, edgesJSON string, allowUnavailablePlugins bool) error
 }
 
-func NewPipelineHandler(store *query.PipelineStore, scheduler *scheduler.Scheduler, validators ...definitionValidator) *PipelineHandler {
-	handler := &PipelineHandler{store: store, scheduler: scheduler}
+type activationValidator interface {
+	ValidatePipeline(ctx context.Context, pipelineModel *models.Pipeline) error
+}
+
+type reloader interface {
+	Reload(ctx context.Context) error
+}
+
+func NewPipelineHandler(store *query.PipelineStore, reloader reloader, validators ...definitionValidator) *PipelineHandler {
+	handler := &PipelineHandler{store: store, reloader: reloader}
 	if len(validators) > 0 {
 		handler.validator = validators[0]
 	}
 	return handler
+}
+
+func (h *PipelineHandler) SetActivationValidator(validator activationValidator) {
+	if h == nil {
+		return
+	}
+	h.activationValidator = validator
 }
 
 func (h *PipelineHandler) List(c *fiber.Ctx) error {
@@ -70,6 +85,13 @@ func (h *PipelineHandler) Create(c *fiber.Ctx) error {
 			"error": err.Error(),
 		})
 	}
+	if h.activationValidator != nil {
+		if err := h.activationValidator.ValidatePipeline(ctx, &req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+	}
 
 	if err := h.store.Create(ctx, &req); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -77,8 +99,8 @@ func (h *PipelineHandler) Create(c *fiber.Ctx) error {
 		})
 	}
 
-	if h.scheduler != nil {
-		_ = h.scheduler.Reload(ctx)
+	if h.reloader != nil {
+		_ = h.reloader.Reload(ctx)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(req)
@@ -139,6 +161,13 @@ func (h *PipelineHandler) Update(c *fiber.Ctx) error {
 			"error": err.Error(),
 		})
 	}
+	if h.activationValidator != nil {
+		if err := h.activationValidator.ValidatePipeline(ctx, &req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+	}
 
 	if err := h.store.Update(ctx, &req); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -146,8 +175,8 @@ func (h *PipelineHandler) Update(c *fiber.Ctx) error {
 		})
 	}
 
-	if h.scheduler != nil {
-		_ = h.scheduler.Reload(ctx)
+	if h.reloader != nil {
+		_ = h.reloader.Reload(ctx)
 	}
 
 	return c.JSON(req)
@@ -173,8 +202,8 @@ func (h *PipelineHandler) Delete(c *fiber.Ctx) error {
 		})
 	}
 
-	if h.scheduler != nil {
-		_ = h.scheduler.Reload(ctx)
+	if h.reloader != nil {
+		_ = h.reloader.Reload(ctx)
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)

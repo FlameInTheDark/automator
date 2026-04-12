@@ -168,7 +168,7 @@ export const NODE_CATEGORIES: NodeCategory[] = [
         icon: 'webhook',
         category: 'trigger',
         color: '#f59e0b',
-        defaultConfig: { path: '', method: 'POST' },
+        defaultConfig: { path: '', method: 'POST', token: '' },
       },
       {
         type: 'trigger:channel_message',

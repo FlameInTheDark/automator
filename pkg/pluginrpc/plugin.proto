@@ -10,6 +10,7 @@ service EmeraldPlugin {
   rpc ExecuteAction(ExecuteActionRequest) returns (ExecuteActionResponse);
   rpc ToolDefinition(ToolDefinitionRequest) returns (ToolDefinitionResponse);
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
+  rpc TriggerRuntime(stream TriggerRuntimeClientMessage) returns (stream TriggerRuntimeServerMessage);
 }
 
 message DescribeRequest {}
@@ -54,4 +55,12 @@ message ExecuteToolRequest {
 
 message ExecuteToolResponse {
   bytes result_json = 1;
+}
+
+message TriggerRuntimeClientMessage {
+  bytes snapshot_json = 1;
+}
+
+message TriggerRuntimeServerMessage {
+  bytes event_json = 1;
 }

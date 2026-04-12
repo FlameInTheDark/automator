@@ -99,7 +99,7 @@ func (r *ExecutionRunner) Run(
 	ctx context.Context,
 	pipelineID string,
 	flowData FlowData,
-	triggerType string,
+	selection TriggerSelection,
 	executionContext map[string]any,
 ) (*ExecutionRunResult, error) {
 	if r.store == nil {
@@ -114,6 +114,7 @@ func (r *ExecutionRunner) Run(
 		}
 	}
 
+	resolvedSelection := ResolveTriggerSelection(ctx, flowData, selection)
 	persistedContext := copyExecutionContext(executionContext)
 	runtimeContext := copyExecutionContext(executionContext)
 	delete(persistedContext, "secret")
@@ -127,8 +128,15 @@ func (r *ExecutionRunner) Run(
 
 	execution := &models.Execution{
 		PipelineID:  pipelineID,
-		TriggerType: triggerType,
+		TriggerType: resolvedSelection.TriggerType,
 		Status:      "running",
+	}
+
+	if len(resolvedSelection.RootNodeIDs) > 0 {
+		persistedContext["_trigger_selection"] = map[string]any{
+			"trigger_type":  resolvedSelection.TriggerType,
+			"root_node_ids": append([]string(nil), resolvedSelection.RootNodeIDs...),
+		}
 	}
 
 	if len(persistedContext) > 0 {
@@ -142,7 +150,7 @@ func (r *ExecutionRunner) Run(
 		return nil, fmt.Errorf("create execution record: %w", err)
 	}
 
-	runCtx, cleanup := r.active.start(ctx, execution.ID, pipelineID, triggerType, execution.StartedAt)
+	runCtx, cleanup := r.active.start(ctx, execution.ID, pipelineID, resolvedSelection.TriggerType, execution.StartedAt)
 	defer cleanup()
 	storeCtx := context.WithoutCancel(runCtx)
 
@@ -153,7 +161,7 @@ func (r *ExecutionRunner) Run(
 		"type":         "execution_started",
 		"pipeline":     pipelineID,
 		"execution":    execution.ID,
-		"trigger_type": triggerType,
+		"trigger_type": resolvedSelection.TriggerType,
 		"status":       "running",
 		"started_at":   execution.StartedAt,
 	})
@@ -204,7 +212,7 @@ func (r *ExecutionRunner) Run(
 		},
 	}
 
-	state, execErr := r.engine.ExecuteWithInput(WithPipelineCall(runCtx, pipelineID), flowData, triggerType, runtimeContext, observer)
+	state, execErr := r.engine.ExecuteWithSelection(WithPipelineCall(runCtx, pipelineID), flowData, resolvedSelection, runtimeContext, observer)
 	completedAt := time.Now()
 
 	status := "completed"
@@ -235,7 +243,7 @@ func (r *ExecutionRunner) Run(
 	result := &ExecutionRunResult{
 		ExecutionID: execution.ID,
 		PipelineID:  pipelineID,
-		TriggerType: triggerType,
+		TriggerType: resolvedSelection.TriggerType,
 		Status:      status,
 		StartedAt:   execution.StartedAt,
 		CompletedAt: completedAt,

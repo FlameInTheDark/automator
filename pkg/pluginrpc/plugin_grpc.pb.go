@@ -24,6 +24,7 @@ const (
 	EmeraldPlugin_ExecuteAction_FullMethodName  = "/pluginrpc.EmeraldPlugin/ExecuteAction"
 	EmeraldPlugin_ToolDefinition_FullMethodName = "/pluginrpc.EmeraldPlugin/ToolDefinition"
 	EmeraldPlugin_ExecuteTool_FullMethodName    = "/pluginrpc.EmeraldPlugin/ExecuteTool"
+	EmeraldPlugin_TriggerRuntime_FullMethodName = "/pluginrpc.EmeraldPlugin/TriggerRuntime"
 )
 
 // EmeraldPluginClient is the client API for EmeraldPlugin service.
@@ -35,6 +36,7 @@ type EmeraldPluginClient interface {
 	ExecuteAction(ctx context.Context, in *ExecuteActionRequest, opts ...grpc.CallOption) (*ExecuteActionResponse, error)
 	ToolDefinition(ctx context.Context, in *ToolDefinitionRequest, opts ...grpc.CallOption) (*ToolDefinitionResponse, error)
 	ExecuteTool(ctx context.Context, in *ExecuteToolRequest, opts ...grpc.CallOption) (*ExecuteToolResponse, error)
+	TriggerRuntime(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage], error)
 }
 
 type emeraldPluginClient struct {
@@ -95,6 +97,19 @@ func (c *emeraldPluginClient) ExecuteTool(ctx context.Context, in *ExecuteToolRe
 	return out, nil
 }
 
+func (c *emeraldPluginClient) TriggerRuntime(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EmeraldPlugin_ServiceDesc.Streams[0], EmeraldPlugin_TriggerRuntime_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EmeraldPlugin_TriggerRuntimeClient = grpc.BidiStreamingClient[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage]
+
 // EmeraldPluginServer is the server API for EmeraldPlugin service.
 // All implementations must embed UnimplementedEmeraldPluginServer
 // for forward compatibility.
@@ -104,6 +119,7 @@ type EmeraldPluginServer interface {
 	ExecuteAction(context.Context, *ExecuteActionRequest) (*ExecuteActionResponse, error)
 	ToolDefinition(context.Context, *ToolDefinitionRequest) (*ToolDefinitionResponse, error)
 	ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error)
+	TriggerRuntime(grpc.BidiStreamingServer[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage]) error
 	mustEmbedUnimplementedEmeraldPluginServer()
 }
 
@@ -128,6 +144,9 @@ func (UnimplementedEmeraldPluginServer) ToolDefinition(context.Context, *ToolDef
 }
 func (UnimplementedEmeraldPluginServer) ExecuteTool(context.Context, *ExecuteToolRequest) (*ExecuteToolResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExecuteTool not implemented")
+}
+func (UnimplementedEmeraldPluginServer) TriggerRuntime(grpc.BidiStreamingServer[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage]) error {
+	return status.Error(codes.Unimplemented, "method TriggerRuntime not implemented")
 }
 func (UnimplementedEmeraldPluginServer) mustEmbedUnimplementedEmeraldPluginServer() {}
 func (UnimplementedEmeraldPluginServer) testEmbeddedByValue()                       {}
@@ -240,6 +259,13 @@ func _EmeraldPlugin_ExecuteTool_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EmeraldPlugin_TriggerRuntime_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EmeraldPluginServer).TriggerRuntime(&grpc.GenericServerStream[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EmeraldPlugin_TriggerRuntimeServer = grpc.BidiStreamingServer[TriggerRuntimeClientMessage, TriggerRuntimeServerMessage]
+
 // EmeraldPlugin_ServiceDesc is the grpc.ServiceDesc for EmeraldPlugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -268,6 +294,13 @@ var EmeraldPlugin_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _EmeraldPlugin_ExecuteTool_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "TriggerRuntime",
+			Handler:       _EmeraldPlugin_TriggerRuntime_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "pkg/pluginrpc/plugin.proto",
 }

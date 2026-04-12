@@ -3,8 +3,11 @@ package pluginsdk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os/exec"
+	"sync"
 
 	hclog "github.com/hashicorp/go-hclog"
 	plugin "github.com/hashicorp/go-plugin"
@@ -151,6 +154,68 @@ func (s *grpcServer) ExecuteTool(ctx context.Context, req *pluginrpc.ExecuteTool
 	return &pluginrpc.ExecuteToolResponse{ResultJson: payload}, nil
 }
 
+func (s *grpcServer) TriggerRuntime(stream pluginrpc.EmeraldPlugin_TriggerRuntimeServer) error {
+	runtime, err := s.impl.OpenTriggerRuntime(stream.Context())
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+
+	recvErrCh := make(chan error, 1)
+	go func() {
+		defer close(recvErrCh)
+
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+					return
+				}
+				_ = runtime.Close()
+				recvErrCh <- err
+				return
+			}
+
+			var snapshot pluginapi.TriggerSubscriptionSnapshot
+			if err := unmarshalOptionalJSONPayload(msg.GetSnapshotJson(), &snapshot); err != nil {
+				_ = runtime.Close()
+				recvErrCh <- fmt.Errorf("decode trigger snapshot: %w", err)
+				return
+			}
+
+			if err := runtime.SendSnapshot(stream.Context(), snapshot); err != nil {
+				_ = runtime.Close()
+				recvErrCh <- err
+				return
+			}
+		}
+	}()
+
+	for {
+		event, err := runtime.Recv(stream.Context())
+		if err != nil {
+			if recvErr, ok := <-recvErrCh; ok && recvErr != nil {
+				return recvErr
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		if event == nil {
+			continue
+		}
+
+		payload, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("marshal trigger event: %w", err)
+		}
+		if err := stream.Send(&pluginrpc.TriggerRuntimeServerMessage{EventJson: payload}); err != nil {
+			return err
+		}
+	}
+}
+
 type grpcClient struct {
 	ctx    context.Context
 	client pluginrpc.EmeraldPluginClient
@@ -238,6 +303,17 @@ func (c *grpcClient) ExecuteTool(ctx context.Context, nodeID string, config json
 	return decodeResult(resp.GetResultJson())
 }
 
+func (c *grpcClient) OpenTriggerRuntime(ctx context.Context) (pluginapi.TriggerRuntime, error) {
+	stream, err := c.client.TriggerRuntime(c.callContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	return &remoteTriggerRuntime{
+		stream: stream,
+	}, nil
+}
+
 func (c *grpcClient) callContext(ctx context.Context) context.Context {
 	if ctx != nil {
 		return ctx
@@ -292,4 +368,54 @@ func unmarshalJSONPayload[T any](payload []byte, target *T) error {
 		return err
 	}
 	return nil
+}
+
+func unmarshalOptionalJSONPayload[T any](payload []byte, target *T) error {
+	if len(payload) == 0 {
+		var zero T
+		*target = zero
+		return nil
+	}
+	return json.Unmarshal(payload, target)
+}
+
+type remoteTriggerRuntime struct {
+	stream    pluginrpc.EmeraldPlugin_TriggerRuntimeClient
+	sendMu    sync.Mutex
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (r *remoteTriggerRuntime) SendSnapshot(_ context.Context, snapshot pluginapi.TriggerSubscriptionSnapshot) error {
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("encode trigger snapshot: %w", err)
+	}
+
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+
+	return r.stream.Send(&pluginrpc.TriggerRuntimeClientMessage{SnapshotJson: payload})
+}
+
+func (r *remoteTriggerRuntime) Recv(_ context.Context) (*pluginapi.TriggerEvent, error) {
+	resp, err := r.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+
+	var event pluginapi.TriggerEvent
+	if err := unmarshalJSONPayload(resp.GetEventJson(), &event); err != nil {
+		return nil, fmt.Errorf("decode trigger event: %w", err)
+	}
+
+	return &event, nil
+}
+
+func (r *remoteTriggerRuntime) Close() error {
+	r.closeOnce.Do(func() {
+		r.closeErr = r.stream.CloseSend()
+	})
+
+	return r.closeErr
 }

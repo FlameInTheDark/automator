@@ -9,6 +9,7 @@ import (
 
 	"github.com/FlameInTheDark/emerald/internal/node"
 	"github.com/FlameInTheDark/emerald/internal/node/logic"
+	"github.com/FlameInTheDark/emerald/internal/node/trigger"
 	"github.com/FlameInTheDark/emerald/internal/pipeline"
 	"github.com/FlameInTheDark/emerald/internal/templating"
 )
@@ -718,6 +719,104 @@ func TestEngine_Execute_MergeNodeCombinesUpstreamObjects(t *testing.T) {
 	}
 	if got := metrics["memory"]; got != float64(72) {
 		t.Fatalf("metrics.memory = %#v, want 72", got)
+	}
+}
+
+func TestEngine_ExecuteWithSelection_DoesNotBlockSharedNodeOnUnmatchedTriggerRoot(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register(node.TypeTriggerManual, &trigger.ManualTrigger{})
+	registry.Register(node.TypeTriggerWebhook, &trigger.WebhookTrigger{})
+	registry.Register("test:consumer", &testExecutor{output: map[string]any{"handled": true}})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{ID: "manual", Type: string(node.TypeTriggerManual)},
+			{ID: "webhook", Type: string(node.TypeTriggerWebhook)},
+			{ID: "consumer", Type: "test:consumer"},
+		},
+		Edges: []pipeline.FlowEdge{
+			{ID: "e1", Source: "manual", Target: "consumer"},
+			{ID: "e2", Source: "webhook", Target: "consumer"},
+		},
+	}
+
+	state, err := engine.ExecuteWithSelection(context.Background(), flowData, pipeline.TriggerSelection{TriggerType: "manual"}, nil)
+	if err != nil {
+		t.Fatalf("ExecuteWithSelection() error = %v", err)
+	}
+
+	if len(state.NodeRuns) != 2 {
+		t.Fatalf("expected 2 node runs, got %d", len(state.NodeRuns))
+	}
+	if _, ok := state.NodeResults["manual"]; !ok {
+		t.Fatalf("expected manual trigger to run")
+	}
+	if _, ok := state.NodeResults["consumer"]; !ok {
+		t.Fatalf("expected consumer to run")
+	}
+	if _, ok := state.NodeResults["webhook"]; ok {
+		t.Fatalf("did not expect unmatched webhook trigger to run")
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal(state.NodeResults["consumer"].Output, &output); err != nil {
+		t.Fatalf("unmarshal consumer output: %v", err)
+	}
+
+	if got := output["input_triggered_by"]; got != "manual" {
+		t.Fatalf("consumer input_triggered_by = %#v, want manual", got)
+	}
+}
+
+func TestEngine_ExecuteWithSelection_WaitsForAllSelectedRootsBeforeSharedNode(t *testing.T) {
+	registry := node.NewRegistry()
+	registry.Register("test:left", &testExecutor{output: map[string]any{"left": true}})
+	registry.Register("test:right", &testExecutor{output: map[string]any{"right": true}})
+	registry.Register("test:consumer", &testExecutor{output: map[string]any{"handled": true}})
+
+	engine := pipeline.NewEngine(registry)
+
+	flowData := pipeline.FlowData{
+		Nodes: []pipeline.FlowNode{
+			{ID: "left", Type: "test:left"},
+			{ID: "right", Type: "test:right"},
+			{ID: "consumer", Type: "test:consumer"},
+		},
+		Edges: []pipeline.FlowEdge{
+			{ID: "e1", Source: "left", Target: "consumer"},
+			{ID: "e2", Source: "right", Target: "consumer"},
+		},
+	}
+
+	state, err := engine.ExecuteWithSelection(
+		context.Background(),
+		flowData,
+		pipeline.TriggerSelectionFromNodeIDs("manual", []string{"left", "right"}),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ExecuteWithSelection() error = %v", err)
+	}
+
+	if len(state.NodeRuns) != 3 {
+		t.Fatalf("expected 3 node runs, got %d", len(state.NodeRuns))
+	}
+	if state.NodeRuns[2].NodeID != "consumer" {
+		t.Fatalf("expected shared consumer to run after both roots, got %q", state.NodeRuns[2].NodeID)
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal(state.NodeResults["consumer"].Output, &output); err != nil {
+		t.Fatalf("unmarshal consumer output: %v", err)
+	}
+
+	if got := output["input_left"]; got != true {
+		t.Fatalf("consumer input_left = %#v, want true", got)
+	}
+	if got := output["input_right"]; got != true {
+		t.Fatalf("consumer input_right = %#v, want true", got)
 	}
 }
 

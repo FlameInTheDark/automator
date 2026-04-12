@@ -10,8 +10,9 @@ const APIVersion = "v1"
 type NodeKind string
 
 const (
-	NodeKindAction NodeKind = "action"
-	NodeKindTool   NodeKind = "tool"
+	NodeKindAction  NodeKind = "action"
+	NodeKindTrigger NodeKind = "trigger"
+	NodeKindTool    NodeKind = "tool"
 )
 
 type FieldType string
@@ -95,17 +96,46 @@ type ToolSpec struct {
 	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
+type TriggerSubscription struct {
+	SubscriptionID string          `json:"subscription_id"`
+	PipelineID     string          `json:"pipeline_id,omitempty"`
+	NodeType       string          `json:"node_type,omitempty"`
+	NodeID         string          `json:"node_id"`
+	NodeInstanceID string          `json:"node_instance_id,omitempty"`
+	Config         json.RawMessage `json:"config,omitempty"`
+}
+
+type TriggerSubscriptionSnapshot struct {
+	Subscriptions []TriggerSubscription `json:"subscriptions"`
+}
+
+type TriggerEvent struct {
+	SubscriptionID string `json:"subscription_id"`
+	Payload        any    `json:"payload,omitempty"`
+}
+
+type TriggerRuntime interface {
+	SendSnapshot(ctx context.Context, snapshot TriggerSubscriptionSnapshot) error
+	Recv(ctx context.Context) (*TriggerEvent, error)
+	Close() error
+}
+
 type Plugin interface {
 	Describe(ctx context.Context) (PluginInfo, error)
 	ValidateConfig(ctx context.Context, nodeID string, config json.RawMessage) error
 	ExecuteAction(ctx context.Context, nodeID string, config json.RawMessage, input map[string]any) (any, error)
 	ToolDefinition(ctx context.Context, nodeID string, meta ToolNodeMetadata, config json.RawMessage) (*ToolDefinition, error)
 	ExecuteTool(ctx context.Context, nodeID string, config json.RawMessage, args json.RawMessage, input map[string]any) (any, error)
+	OpenTriggerRuntime(ctx context.Context) (TriggerRuntime, error)
 }
 
 type ActionNode interface {
 	ValidateConfig(ctx context.Context, config json.RawMessage) error
 	Execute(ctx context.Context, config json.RawMessage, input map[string]any) (any, error)
+}
+
+type TriggerNode interface {
+	ValidateConfig(ctx context.Context, config json.RawMessage) error
 }
 
 type ToolNode interface {
@@ -114,10 +144,16 @@ type ToolNode interface {
 	ExecuteTool(ctx context.Context, config json.RawMessage, args json.RawMessage, input map[string]any) (any, error)
 }
 
+type TriggerRuntimeProvider interface {
+	OpenTriggerRuntime(ctx context.Context) (TriggerRuntime, error)
+}
+
 type Bundle struct {
-	Info    PluginInfo
-	Actions map[string]ActionNode
-	Tools   map[string]ToolNode
+	Info                   PluginInfo
+	Actions                map[string]ActionNode
+	Triggers               map[string]TriggerNode
+	Tools                  map[string]ToolNode
+	TriggerRuntimeProvider TriggerRuntimeProvider
 }
 
 func (b *Bundle) Describe(_ context.Context) (PluginInfo, error) {
@@ -127,6 +163,9 @@ func (b *Bundle) Describe(_ context.Context) (PluginInfo, error) {
 func (b *Bundle) ValidateConfig(ctx context.Context, nodeID string, config json.RawMessage) error {
 	if action, ok := b.Actions[nodeID]; ok {
 		return action.ValidateConfig(ctx, config)
+	}
+	if trigger, ok := b.Triggers[nodeID]; ok {
+		return trigger.ValidateConfig(ctx, config)
 	}
 	if tool, ok := b.Tools[nodeID]; ok {
 		return tool.ValidateConfig(ctx, config)
@@ -156,4 +195,12 @@ func (b *Bundle) ExecuteTool(ctx context.Context, nodeID string, config json.Raw
 		return nil, ErrUnknownNode(nodeID)
 	}
 	return tool.ExecuteTool(ctx, config, args, input)
+}
+
+func (b *Bundle) OpenTriggerRuntime(ctx context.Context) (TriggerRuntime, error) {
+	if b == nil || b.TriggerRuntimeProvider == nil {
+		return nil, ErrTriggerRuntimeUnsupported()
+	}
+
+	return b.TriggerRuntimeProvider.OpenTriggerRuntime(ctx)
 }

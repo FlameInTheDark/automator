@@ -31,6 +31,7 @@ import (
 	"github.com/FlameInTheDark/emerald/internal/scheduler"
 	"github.com/FlameInTheDark/emerald/internal/shellcmd"
 	"github.com/FlameInTheDark/emerald/internal/skills"
+	triggerservice "github.com/FlameInTheDark/emerald/internal/triggers"
 	"github.com/FlameInTheDark/emerald/internal/ws"
 	"github.com/FlameInTheDark/emerald/pkg/pluginapi"
 )
@@ -112,9 +113,18 @@ func main() {
 		log.Printf("failed to load plugins: %v", err)
 	}
 
+	var triggerService *triggerservice.Service
+	pluginTriggerService := plugins.NewTriggerRuntimeService(pluginManager, func(ctx context.Context, subscription pluginapi.TriggerSubscription, event *pluginapi.TriggerEvent) error {
+		if triggerService == nil {
+			return nil
+		}
+		return triggerService.HandlePluginEvent(ctx, subscription, event)
+	})
+
 	var pluginCleanupOnce sync.Once
 	cleanupPlugins := func() {
 		pluginCleanupOnce.Do(func() {
+			pluginTriggerService.Stop()
 			pluginManager.Stop()
 			hplugin.CleanupClients()
 		})
@@ -161,11 +171,12 @@ func main() {
 				log.Printf("failed to parse channel pipeline %s: %v", pipelineModel.ID, err)
 				continue
 			}
-			if !pipeline.HasMatchingRootTrigger(eventCtx, *flowData, "channel") {
+			selection := pipeline.ResolveTriggerSelection(eventCtx, *flowData, pipeline.TriggerSelection{TriggerType: "channel"})
+			if len(selection.RootNodeIDs) == 0 {
 				continue
 			}
 
-			result, err := executionRunner.Run(eventCtx, pipelineModel.ID, *flowData, "channel", executionContext)
+			result, err := executionRunner.Run(eventCtx, pipelineModel.ID, *flowData, selection, executionContext)
 			if err != nil {
 				log.Printf("channel pipeline %s execution failed: %v", pipelineModel.ID, err)
 				continue
@@ -250,12 +261,12 @@ func main() {
 		pipeline.WithSecretTemplateValueProvider(secretStore),
 	)
 	pipelineInvoker := pipeline.NewInvoker(database.DB, pipelineStore, engine, executionRunner)
-	pipelineRunner := func(ctx context.Context, pipelineID string) error {
+	pipelineRunner := func(ctx context.Context, pipelineID string, rootNodeID string) error {
 		flowData, err := scheduler.LoadFlowData(database.DB, pipelineID)
 		if err != nil {
 			return err
 		}
-		result, err := executionRunner.Run(ctx, pipelineID, *flowData, "cron", nil)
+		result, err := executionRunner.Run(ctx, pipelineID, *flowData, pipeline.TriggerSelectionFromNodeIDs("cron", []string{rootNodeID}), nil)
 		if err != nil {
 			return err
 		}
@@ -265,7 +276,9 @@ func main() {
 		return nil
 	}
 	cronScheduler := scheduler.New(database.DB, pipelineRunner)
-	pipelineManager := pipelineops.NewService(pipelineStore, cronScheduler, nodeDefinitionService)
+	triggerService = triggerservice.NewService(pipelineStore, cronScheduler, executionRunner, pluginTriggerService)
+	pipelineManager := pipelineops.NewService(pipelineStore, triggerService, nodeDefinitionService)
+	pipelineManager.SetActivationValidator(triggerService)
 	registry.Register(node.TypeToolListNodes, &action.ListNodesToolNode{Clusters: clusterStore})
 	registry.Register(node.TypeToolListVMsCTs, &action.ListVMsCTsToolNode{Clusters: clusterStore})
 	registry.Register(node.TypeToolVMStart, &action.VMStartToolNode{Clusters: clusterStore})
@@ -308,6 +321,11 @@ func main() {
 		}
 
 		switch binding.Kind {
+		case pluginapi.NodeKindTrigger:
+			return &plugins.TriggerExecutor{
+				Manager:  pluginManager,
+				NodeType: binding.Type,
+			}, true
 		case pluginapi.NodeKindTool:
 			return &plugins.ToolExecutor{
 				Manager:  pluginManager,
@@ -324,6 +342,10 @@ func main() {
 
 	cronScheduler.Start()
 	defer cronScheduler.Stop()
+	if err := triggerService.Reload(context.Background()); err != nil {
+		log.Printf("failed to reload trigger runtimes: %v", err)
+	}
+	defer triggerService.Stop()
 
 	if err := channelService.Start(); err != nil {
 		log.Printf("failed to start channel service: %v", err)
@@ -347,6 +369,7 @@ func main() {
 		AuthService:     authService,
 		NodeDefinitions: nodeDefinitionService,
 		SecretStore:     secretStore,
+		TriggerService:  triggerService,
 	})
 
 	serverErrCh := make(chan error, 1)

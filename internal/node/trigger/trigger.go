@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/FlameInTheDark/emerald/internal/node"
@@ -40,12 +41,7 @@ func ChannelEventFromContext(ctx context.Context) (ChannelEvent, bool) {
 }
 
 func IsTriggerType(nodeType node.NodeType) bool {
-	switch nodeType {
-	case node.TypeTriggerManual, node.TypeTriggerCron, node.TypeTriggerWebhook, node.TypeTriggerChannel:
-		return true
-	default:
-		return false
-	}
+	return strings.HasPrefix(strings.TrimSpace(string(nodeType)), "trigger:")
 }
 
 func MatchesExecution(ctx context.Context, nodeType node.NodeType, config json.RawMessage, triggerType string) bool {
@@ -136,15 +132,75 @@ func (e *CronTrigger) Validate(config json.RawMessage) error {
 
 type WebhookTrigger struct{}
 
-type webhookConfig struct {
+type WebhookConfig struct {
 	Path   string `json:"path"`
 	Method string `json:"method"`
+	Token  string `json:"token"`
+}
+
+func DecodeWebhookConfig(config json.RawMessage) (WebhookConfig, error) {
+	cfg := WebhookConfig{Method: "POST"}
+	if len(config) == 0 {
+		return cfg, nil
+	}
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return WebhookConfig{}, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return NormalizeWebhookConfig(cfg)
+}
+
+func NormalizeWebhookConfig(cfg WebhookConfig) (WebhookConfig, error) {
+	cfg.Path = NormalizeWebhookPath(cfg.Path)
+	cfg.Method = NormalizeWebhookMethod(cfg.Method)
+	cfg.Token = strings.TrimSpace(cfg.Token)
+
+	if cfg.Path == "" || cfg.Path == "/webhook" {
+		return WebhookConfig{}, fmt.Errorf("path is required")
+	}
+
+	switch cfg.Method {
+	case "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT":
+		return cfg, nil
+	default:
+		return WebhookConfig{}, fmt.Errorf("method %q is not supported", cfg.Method)
+	}
+}
+
+func NormalizeWebhookPath(rawPath string) string {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return ""
+	}
+
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+
+	cleaned := path.Clean(trimmed)
+	if cleaned == "." || cleaned == "/" {
+		return ""
+	}
+
+	if strings.HasPrefix(cleaned, "/webhook/") || cleaned == "/webhook" {
+		return cleaned
+	}
+
+	return "/webhook/" + strings.Trim(strings.TrimPrefix(cleaned, "/"), "/")
+}
+
+func NormalizeWebhookMethod(method string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(method))
+	if normalized == "" {
+		return "POST"
+	}
+	return normalized
 }
 
 func (e *WebhookTrigger) Execute(ctx context.Context, config json.RawMessage, input map[string]any) (*node.NodeResult, error) {
-	var cfg webhookConfig
-	if err := json.Unmarshal(config, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	cfg, err := DecodeWebhookConfig(config)
+	if err != nil {
+		return nil, err
 	}
 
 	output := map[string]any{
@@ -153,19 +209,20 @@ func (e *WebhookTrigger) Execute(ctx context.Context, config json.RawMessage, in
 		"method":       cfg.Method,
 		"input":        input,
 	}
+	copyWebhookField(output, input, "body")
+	copyWebhookField(output, input, "raw_body")
+	copyWebhookField(output, input, "headers")
+	copyWebhookField(output, input, "query")
+	copyWebhookField(output, input, "content_type")
+	copyWebhookField(output, input, "remote_ip")
+	copyWebhookField(output, input, "user_agent")
 	data, _ := json.Marshal(output)
 	return &node.NodeResult{Output: data}, nil
 }
 
 func (e *WebhookTrigger) Validate(config json.RawMessage) error {
-	var cfg webhookConfig
-	if err := json.Unmarshal(config, &cfg); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-	if cfg.Path == "" {
-		return fmt.Errorf("path is required")
-	}
-	return nil
+	_, err := DecodeWebhookConfig(config)
+	return err
 }
 
 type ChannelMessageTrigger struct{}
@@ -215,4 +272,14 @@ func (e *ChannelMessageTrigger) Validate(config json.RawMessage) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 	return nil
+}
+
+func copyWebhookField(target map[string]any, input map[string]any, key string) {
+	if target == nil || len(input) == 0 {
+		return
+	}
+
+	if value, ok := input[key]; ok {
+		target[key] = value
+	}
 }
