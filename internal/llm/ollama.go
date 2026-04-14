@@ -14,6 +14,7 @@ import (
 
 type OllamaProvider struct {
 	baseURL    string
+	apiKey     string
 	model      string
 	httpClient *http.Client
 }
@@ -61,6 +62,7 @@ func NewOllamaProvider(cfg Config) (*OllamaProvider, error) {
 
 	return &OllamaProvider{
 		baseURL: baseURL,
+		apiKey:  cfg.APIKey,
 		model:   cfg.Model,
 		httpClient: &http.Client{
 			Timeout: 300 * time.Second,
@@ -90,6 +92,9 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
@@ -136,6 +141,9 @@ func (p *OllamaProvider) ChatStream(ctx context.Context, req ChatRequest, handle
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
