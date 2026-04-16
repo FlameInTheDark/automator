@@ -17,7 +17,9 @@ func TestUserStoreCreateEncryptsPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.New: %v", err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		_ = database.Close()
+	})
 
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("db.Migrate: %v", err)
@@ -69,7 +71,9 @@ func TestUserStoreGetByUsernameReturnsNilWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.New: %v", err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		_ = database.Close()
+	})
 
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("db.Migrate: %v", err)
@@ -103,7 +107,9 @@ func TestUserStoreUpdatePasswordEncryptsNewValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.New: %v", err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		_ = database.Close()
+	})
 
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("db.Migrate: %v", err)

@@ -97,7 +97,9 @@ func (s *UserStore) List(ctx context.Context) ([]models.User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query users: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	users := make([]models.User, 0)
 	for rows.Next() {

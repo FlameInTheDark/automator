@@ -74,7 +74,9 @@ func (s *TemplateStore) List(ctx context.Context) ([]models.Template, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query templates: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var templates []models.Template
 	for rows.Next() {

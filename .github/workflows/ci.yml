@@ -1,0 +1,43 @@
+name: Emerald CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install frontend dependencies
+        run: npm --prefix web ci
+
+      - name: Build embedded frontend
+        run: npm --prefix web run build
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest

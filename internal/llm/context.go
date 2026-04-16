@@ -117,7 +117,7 @@ func extraConfigInt(extraConfig map[string]any, key string) int {
 		if parsed == "" {
 			return 0
 		}
-		var number json.Number = json.Number(parsed)
+		number := json.Number(parsed)
 		intValue, err := number.Int64()
 		if err == nil {
 			return int(intValue)

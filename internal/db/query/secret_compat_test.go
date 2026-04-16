@@ -15,7 +15,7 @@ func TestChannelStoreLoadsLegacyPlaintextConfig(t *testing.T) {
 	database, encryptor := newCompatTestDB(t)
 	config := `{"botToken":"legacy-token"}`
 
-	_, err := database.DB.ExecContext(
+	_, err := database.ExecContext(
 		context.Background(),
 		`INSERT INTO channels (id, name, type, config, welcome_message, enabled) VALUES (?, ?, ?, ?, ?, ?)`,
 		"channel-1",
@@ -53,7 +53,7 @@ func TestClusterStoreLoadsLegacyPlaintextSecret(t *testing.T) {
 
 	database, encryptor := newCompatTestDB(t)
 
-	_, err := database.DB.ExecContext(
+	_, err := database.ExecContext(
 		context.Background(),
 		`INSERT INTO clusters (id, name, host, port, api_token_id, api_token_secret, skip_tls_verify) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"cluster-1",
@@ -83,7 +83,7 @@ func TestLLMProviderStoreLoadsLegacyPlaintextAPIKey(t *testing.T) {
 
 	database, encryptor := newCompatTestDB(t)
 
-	_, err := database.DB.ExecContext(
+	_, err := database.ExecContext(
 		context.Background(),
 		`INSERT INTO llm_providers (id, name, provider_type, api_key, model, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
 		"provider-1",
@@ -122,7 +122,7 @@ func TestKubernetesClusterStoreLoadsLegacyPlaintextKubeconfig(t *testing.T) {
 	database, encryptor := newCompatTestDB(t)
 	kubeconfig := "apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: \"\"\nkind: Config\nusers: []\n"
 
-	_, err := database.DB.ExecContext(
+	_, err := database.ExecContext(
 		context.Background(),
 		`INSERT INTO kubernetes_clusters (id, name, source_type, kubeconfig, context_name, default_namespace, server) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"k8s-1",

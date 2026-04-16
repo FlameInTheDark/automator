@@ -87,7 +87,9 @@ func (s *ClusterStore) List(ctx context.Context) ([]models.Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query clusters: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var clusters []models.Cluster
 	for rows.Next() {

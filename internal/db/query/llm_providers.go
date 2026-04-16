@@ -84,7 +84,9 @@ func (s *LLMProviderStore) List(ctx context.Context) ([]models.LLMProvider, erro
 	if err != nil {
 		return nil, fmt.Errorf("query llm providers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var providers []models.LLMProvider
 	for rows.Next() {

@@ -99,7 +99,9 @@ func (s *ChannelStore) List(ctx context.Context) ([]models.Channel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query channels: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var channels []models.Channel
 	for rows.Next() {
@@ -138,7 +140,9 @@ func (s *ChannelStore) ListEnabled(ctx context.Context) ([]models.Channel, error
 	if err != nil {
 		return nil, fmt.Errorf("query enabled channels: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var channels []models.Channel
 	for rows.Next() {

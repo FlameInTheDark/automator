@@ -41,6 +41,11 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Run lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
       - name: Run semantic-release
         id: semantic
         uses: cycjimmy/semantic-release-action@v4

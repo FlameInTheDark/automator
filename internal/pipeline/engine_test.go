@@ -15,7 +15,6 @@ import (
 )
 
 type testExecutor struct {
-	name   string
 	output map[string]any
 }
 

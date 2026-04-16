@@ -528,32 +528,10 @@ func parsePipelineParams(raw string, fallback map[string]any) (map[string]any, e
 	return params, nil
 }
 
-func parseToolParams(args json.RawMessage) (map[string]any, error) {
-	if len(args) == 0 {
-		return make(map[string]any), nil
-	}
-
-	var payload struct {
-		Params map[string]any `json:"params"`
-	}
-	if err := json.Unmarshal(args, &payload); err != nil {
-		return nil, fmt.Errorf("parse tool args: %w", err)
-	}
-	if payload.Params == nil {
-		return make(map[string]any), nil
-	}
-
-	return payload.Params, nil
-}
-
 type runPipelineToolArgs struct {
 	PipelineID string         `json:"pipelineId"`
 	Params     map[string]any `json:"params"`
 	Arguments  map[string]any `json:"-"`
-}
-
-func parseRunPipelineToolArgs(args json.RawMessage) (runPipelineToolArgs, error) {
-	return parseRunPipelineToolArgsWithConfig(args, nil)
 }
 
 func parsePipelineListToolArgs(args json.RawMessage) (pipelineListToolArgs, error) {
@@ -817,12 +795,12 @@ func isValidToolArgumentName(name string) bool {
 
 	for index, r := range name {
 		if index == 0 {
-			if !(unicode.IsLetter(r) || r == '_') {
+			if !unicode.IsLetter(r) && r != '_' {
 				return false
 			}
 			continue
 		}
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
 			return false
 		}
 	}

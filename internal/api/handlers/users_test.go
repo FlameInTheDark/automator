@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -125,12 +126,16 @@ func TestUserHandlerChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 func newUserHandlerTestDeps(t *testing.T) (*query.UserStore, *auth.Service) {
 	t.Helper()
 
-	database, err := db.New(filepath.Join(t.TempDir(), "emerald.db"))
+	dbPath := filepath.Join(t.TempDir(), "emerald.db")
+
+	database, err := db.New(dbPath)
 	if err != nil {
 		t.Fatalf("db.New: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = database.Close()
+		_ = os.Remove(dbPath + "-wal")
+		_ = os.Remove(dbPath + "-shm")
 	})
 
 	if err := db.Migrate(database); err != nil {

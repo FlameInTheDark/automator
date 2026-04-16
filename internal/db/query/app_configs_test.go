@@ -15,7 +15,9 @@ func TestAppConfigStoreEnsureEncryptionKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.New: %v", err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		_ = database.Close()
+	})
 
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("db.Migrate: %v", err)

@@ -114,7 +114,9 @@ func TestEngine_LLMAgentRetriesAfterToolError(t *testing.T) {
 			if len(payload.Messages) != 2 {
 				t.Fatalf("first request message count = %d, want 2", len(payload.Messages))
 			}
-			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call-1","type":"function","function":{"name":"lookup_item","arguments":"{\"target\":\"wrong\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`)
+			if _, err := fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call-1","type":"function","function":{"name":"lookup_item","arguments":"{\"target\":\"wrong\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`); err != nil {
+				t.Fatalf("write provider response: %v", err)
+			}
 		case 2:
 			if len(payload.Messages) != 4 {
 				t.Fatalf("second request message count = %d, want 4", len(payload.Messages))
@@ -128,7 +130,9 @@ func TestEngine_LLMAgentRetriesAfterToolError(t *testing.T) {
 			if !strings.Contains(payload.Messages[3].Content, `"error":"item \"wrong\" not found"`) {
 				t.Fatalf("second request tool message content = %q, want embedded error", payload.Messages[3].Content)
 			}
-			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call-2","type":"function","function":{"name":"lookup_item","arguments":"{\"target\":\"correct\"}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`)
+			if _, err := fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call-2","type":"function","function":{"name":"lookup_item","arguments":"{\"target\":\"correct\"}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`); err != nil {
+				t.Fatalf("write provider response: %v", err)
+			}
 		case 3:
 			if len(payload.Messages) != 6 {
 				t.Fatalf("third request message count = %d, want 6", len(payload.Messages))
@@ -139,7 +143,9 @@ func TestEngine_LLMAgentRetriesAfterToolError(t *testing.T) {
 			if !strings.Contains(payload.Messages[5].Content, `"name":"correct"`) {
 				t.Fatalf("third request tool success content = %q, want successful result", payload.Messages[5].Content)
 			}
-			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Recovered after tool error."}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`)
+			if _, err := fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Recovered after tool error."}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`); err != nil {
+				t.Fatalf("write provider response: %v", err)
+			}
 		default:
 			t.Fatalf("unexpected provider request count: %d", requestCount)
 		}

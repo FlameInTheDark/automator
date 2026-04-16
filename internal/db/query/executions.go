@@ -93,7 +93,9 @@ func (s *ExecutionStore) ListByPipeline(ctx context.Context, pipelineID string) 
 	if err != nil {
 		return nil, fmt.Errorf("query executions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var executions []models.Execution
 	for rows.Next() {
@@ -160,7 +162,9 @@ func (s *ExecutionStore) ListByExecution(ctx context.Context, executionID string
 	if err != nil {
 		return nil, fmt.Errorf("query node executions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	nodeExecutions := make([]models.NodeExecution, 0)
 	for rows.Next() {

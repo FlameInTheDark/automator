@@ -29,7 +29,9 @@ func WSUpgrader(hub *Hub) fiber.Handler {
 
 		hub.Register(client)
 		defer hub.Unregister(client)
-		defer c.Close()
+		defer func() {
+			_ = c.Close()
+		}()
 
 		readDone := make(chan struct{})
 

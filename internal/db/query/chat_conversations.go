@@ -57,7 +57,9 @@ func (s *ChatStore) ListByUser(ctx context.Context, userID string) ([]models.Cha
 	if err != nil {
 		return nil, fmt.Errorf("query chat conversations: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	conversations := make([]models.ChatConversation, 0)
 	for rows.Next() {
@@ -133,7 +135,9 @@ func (s *ChatStore) ListMessages(ctx context.Context, conversationID string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("query chat messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	messages := make([]models.ChatMessage, 0)
 	for rows.Next() {

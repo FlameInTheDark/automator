@@ -524,7 +524,7 @@ func validateFlowEdge(edge flowEdge, nodeTypes map[string]string) error {
 		return fmt.Errorf("tool node %q (%s) cannot be part of the main execution chain; connect it from an LLM Agent tool handle instead", targetID, targetType)
 	}
 	if sourceType == "logic:return" {
-		return fmt.Errorf("Return node %q cannot have outgoing edges", sourceID)
+		return fmt.Errorf("return node %q cannot have outgoing edges", sourceID)
 	}
 	if isTriggerNodeType(targetType) {
 		return fmt.Errorf("trigger node %q (%s) cannot have incoming edges", targetID, targetType)

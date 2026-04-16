@@ -150,7 +150,7 @@ func validateFlowEdge(edge FlowEdge, nodeTypes map[string]node.NodeType) error {
 		return fmt.Errorf("tool node %q (%s) cannot be part of the main execution chain; connect it from an LLM Agent tool handle instead", targetID, targetType)
 	}
 	if sourceType == node.TypeLogicReturn {
-		return fmt.Errorf("Return node %q cannot have outgoing edges", sourceID)
+		return fmt.Errorf("return node %q cannot have outgoing edges", sourceID)
 	}
 	if strings.HasPrefix(strings.TrimSpace(string(targetType)), "trigger:") {
 		return fmt.Errorf("trigger node %q (%s) cannot have incoming edges", targetID, targetType)

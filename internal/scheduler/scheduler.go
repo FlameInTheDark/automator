@@ -84,7 +84,9 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("query active pipelines for cron sync: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	for rows.Next() {
 		var pipelineID, nodesJSON, edgesJSON string

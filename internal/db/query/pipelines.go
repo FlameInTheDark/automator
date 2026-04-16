@@ -53,6 +53,21 @@ func (s *PipelineStore) GetByID(ctx context.Context, id string) (*models.Pipelin
 	return &p, nil
 }
 
+func (s *PipelineStore) FindByPartialID(ctx context.Context, partialID string) (*models.Pipeline, error) {
+	query := "SELECT id, name, description, nodes, edges, viewport, status, created_at, updated_at FROM pipelines WHERE id LIKE ?1 ORDER BY created_at DESC LIMIT 1"
+	args := []any{partialID + "%"}
+
+	var p models.Pipeline
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+		&p.ID, &p.Name, &p.Description, &p.Nodes, &p.Edges, &p.Viewport, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query pipeline by partial id: %w", err)
+	}
+
+	return &p, nil
+}
+
 func (s *PipelineStore) List(ctx context.Context) ([]models.Pipeline, error) {
 	query, args, err := psql.Select("id", "name", "description", "nodes", "edges", "status", "created_at", "updated_at").
 		From("pipelines").
@@ -66,7 +81,9 @@ func (s *PipelineStore) List(ctx context.Context) ([]models.Pipeline, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query pipelines: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var pipelines []models.Pipeline
 	for rows.Next() {
@@ -94,7 +111,9 @@ func (s *PipelineStore) ListActive(ctx context.Context) ([]models.Pipeline, erro
 	if err != nil {
 		return nil, fmt.Errorf("query active pipelines: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var pipelines []models.Pipeline
 	for rows.Next() {

@@ -159,7 +159,9 @@ func (s *grpcServer) TriggerRuntime(stream pluginrpc.EmeraldPlugin_TriggerRuntim
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	defer func() {
+		_ = runtime.Close()
+	}()
 
 	recvErrCh := make(chan error, 1)
 	go func() {

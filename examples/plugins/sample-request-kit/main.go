@@ -286,7 +286,9 @@ func executeRequest(ctx context.Context, url string, method string, bearerToken 
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {

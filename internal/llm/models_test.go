@@ -18,7 +18,9 @@ func TestListModelsOpenRouter(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
 			t.Fatalf("unexpected authorization header: %q", got)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"openai/gpt-4o-mini","name":"GPT-4o mini","context_length":128000},{"id":"anthropic/claude-3.7-sonnet","name":"Claude 3.7 Sonnet","context_length":200000}]}`)
+		if _, err := fmt.Fprint(w, `{"data":[{"id":"openai/gpt-4o-mini","name":"GPT-4o mini","context_length":128000},{"id":"anthropic/claude-3.7-sonnet","name":"Claude 3.7 Sonnet","context_length":200000}]}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -47,7 +49,9 @@ func TestListModelsOllama(t *testing.T) {
 		if r.URL.Path != "/api/tags" {
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"models":[{"name":"llama3.2"},{"name":"qwen2.5"}]}`)
+		if _, err := fmt.Fprint(w, `{"models":[{"name":"llama3.2"},{"name":"qwen2.5"}]}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -78,7 +82,9 @@ func TestListModelsCustomProvider(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
 			t.Fatalf("unexpected authorization header: %q", got)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"custom/alpha","name":"Alpha"},{"id":"custom/beta","name":"Beta"}]}`)
+		if _, err := fmt.Fprint(w, `{"data":[{"id":"custom/alpha","name":"Alpha"},{"id":"custom/beta","name":"Beta"}]}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 

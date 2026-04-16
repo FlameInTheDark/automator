@@ -136,11 +136,6 @@ func (e *LLMAgentNode) Validate(config json.RawMessage) error {
 	return nil
 }
 
-type connectedAgentTool struct {
-	definition llm.ToolDefinition
-	execute    func(ctx context.Context, args json.RawMessage) (any, error)
-}
-
 type agentToolRegistry struct {
 	tools    []llm.ToolDefinition
 	handlers map[string]func(ctx context.Context, args json.RawMessage) (any, error)

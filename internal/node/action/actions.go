@@ -498,7 +498,9 @@ func (e *HTTPAction) Execute(ctx context.Context, config json.RawMessage, input 
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

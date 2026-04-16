@@ -38,7 +38,9 @@ func (s *SecretStore) List(ctx context.Context) ([]models.Secret, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query secrets: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	secrets := make([]models.Secret, 0)
 	for rows.Next() {
@@ -167,7 +169,9 @@ func (s *SecretStore) TemplateValues(ctx context.Context) (map[string]string, er
 	if err != nil {
 		return nil, fmt.Errorf("query secrets: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	values := make(map[string]string)
 	for rows.Next() {

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"reflect"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,11 +20,15 @@ type WebhookHandler struct {
 }
 
 func NewWebhookHandler(dispatcher webhookDispatcher) *WebhookHandler {
+	if isNilWebhookDispatcher(dispatcher) {
+		dispatcher = nil
+	}
+
 	return &WebhookHandler{dispatcher: dispatcher}
 }
 
 func (h *WebhookHandler) Handle(c *fiber.Ctx) error {
-	if h == nil || h.dispatcher == nil {
+	if h == nil || isNilWebhookDispatcher(h.dispatcher) {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error": "webhook dispatcher is not configured",
 		})
@@ -108,4 +113,18 @@ func extractWebhookToken(c *fiber.Ctx) string {
 	}
 
 	return strings.TrimSpace(c.Query("token"))
+}
+
+func isNilWebhookDispatcher(dispatcher webhookDispatcher) bool {
+	if dispatcher == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(dispatcher)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

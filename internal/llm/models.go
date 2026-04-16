@@ -88,7 +88,9 @@ func listOpenAICompatibleModels(ctx context.Context, cfg Config, isOpenRouter bo
 	if err != nil {
 		return nil, fmt.Errorf("load models: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -152,7 +154,9 @@ func listOllamaModels(ctx context.Context, cfg Config) ([]ModelInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load models: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {

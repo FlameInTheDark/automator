@@ -103,7 +103,9 @@ func TestOllamaProviderChatParsesObjectToolArguments(t *testing.T) {
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
 
-		fmt.Fprint(w, `{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"list_nodes","arguments":{"cluster_name":"Local"}}}]},"prompt_eval_count":11,"eval_count":5}`)
+		if _, err := fmt.Fprint(w, `{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"list_nodes","arguments":{"cluster_name":"Local"}}}]},"prompt_eval_count":11,"eval_count":5}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -151,13 +153,21 @@ func TestOllamaProviderChatStreamParsesObjectToolArguments(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		fmt.Fprintln(w, `{"message":{"role":"assistant","content":"I'll start"},"done":false}`)
+		if _, err := fmt.Fprintln(w, `{"message":{"role":"assistant","content":"I'll start"},"done":false}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 		flusher.Flush()
-		fmt.Fprintln(w, `{"message":{"role":"assistant","content":" by reading the relevant"},"done":false}`)
+		if _, err := fmt.Fprintln(w, `{"message":{"role":"assistant","content":" by reading the relevant"},"done":false}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 		flusher.Flush()
-		fmt.Fprintln(w, `{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"list_nodes","arguments":{"cluster_name":"Local"}}}]},"done":false}`)
+		if _, err := fmt.Fprintln(w, `{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"list_nodes","arguments":{"cluster_name":"Local"}}}]},"done":false}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 		flusher.Flush()
-		fmt.Fprintln(w, `{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":11,"eval_count":5}`)
+		if _, err := fmt.Fprintln(w, `{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":11,"eval_count":5}`); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 		flusher.Flush()
 	}))
 	defer server.Close()

@@ -122,7 +122,9 @@ func (s *KubernetesClusterStore) List(ctx context.Context) ([]models.KubernetesC
 	if err != nil {
 		return nil, fmt.Errorf("query kubernetes clusters: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var clusters []models.KubernetesCluster
 	for rows.Next() {

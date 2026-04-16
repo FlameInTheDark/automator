@@ -58,12 +58,14 @@ type ExecutionRunResult struct {
 }
 
 type ExecutionRunner struct {
-	store       ExecutionStore
-	engine      *Engine
-	broadcaster ExecutionBroadcaster
-	active      *activeExecutionTracker
-	validator   FlowSemanticValidator
-	secrets     SecretTemplateValueProvider
+	store            ExecutionStore
+	engine           *Engine
+	broadcaster      ExecutionBroadcaster
+	active           *activeExecutionTracker
+	validator        FlowSemanticValidator
+	secrets          SecretTemplateValueProvider
+	progressMu       sync.RWMutex
+	progressCallback ProgressCallback
 }
 
 type ExecutionRunnerOption func(*ExecutionRunner)
@@ -80,6 +82,36 @@ func WithSecretTemplateValueProvider(provider SecretTemplateValueProvider) Execu
 	}
 }
 
+type ProgressEventKind string
+
+const (
+	ProgressEventExecutionStarted   ProgressEventKind = "execution_started"
+	ProgressEventNodeStarted        ProgressEventKind = "node_started"
+	ProgressEventNodeCompleted      ProgressEventKind = "node_completed"
+	ProgressEventExecutionCompleted ProgressEventKind = "execution_completed"
+)
+
+type ProgressEvent struct {
+	Kind         ProgressEventKind
+	ExecutionID  string
+	PipelineID   string
+	TriggerType  string
+	NodeID       string
+	NodeType     string
+	Status       string
+	ErrorMessage string
+	StartedAt    time.Time
+	CompletedAt  time.Time
+}
+
+type ProgressCallback func(event ProgressEvent)
+
+func WithProgressCallback(cb ProgressCallback) ExecutionRunnerOption {
+	return func(r *ExecutionRunner) {
+		r.SetProgressCallback(cb)
+	}
+}
+
 func NewExecutionRunner(store ExecutionStore, engine *Engine, broadcaster ExecutionBroadcaster, opts ...ExecutionRunnerOption) *ExecutionRunner {
 	runner := &ExecutionRunner{
 		store:       store,
@@ -93,6 +125,16 @@ func NewExecutionRunner(store ExecutionStore, engine *Engine, broadcaster Execut
 		}
 	}
 	return runner
+}
+
+func (r *ExecutionRunner) SetProgressCallback(cb ProgressCallback) {
+	if r == nil {
+		return
+	}
+
+	r.progressMu.Lock()
+	r.progressCallback = cb
+	r.progressMu.Unlock()
 }
 
 func (r *ExecutionRunner) Run(
@@ -165,6 +207,14 @@ func (r *ExecutionRunner) Run(
 		"status":       "running",
 		"started_at":   execution.StartedAt,
 	})
+	r.emitProgress(ProgressEvent{
+		Kind:        ProgressEventExecutionStarted,
+		ExecutionID: execution.ID,
+		PipelineID:  pipelineID,
+		TriggerType: resolvedSelection.TriggerType,
+		Status:      "running",
+		StartedAt:   execution.StartedAt,
+	})
 
 	observer := &ExecutionObserver{
 		OnNodeStarted: func(start NodeStart) {
@@ -184,6 +234,16 @@ func (r *ExecutionRunner) Run(
 				"input":      getOptionalString(ne.Input),
 				"status":     ne.Status,
 				"started_at": ne.StartedAt,
+			})
+			r.emitProgress(ProgressEvent{
+				Kind:        ProgressEventNodeStarted,
+				ExecutionID: execution.ID,
+				PipelineID:  pipelineID,
+				TriggerType: resolvedSelection.TriggerType,
+				NodeID:      start.NodeID,
+				NodeType:    start.NodeType,
+				Status:      "running",
+				StartedAt:   start.StartedAt,
 			})
 		},
 		OnNodeCompleted: func(run NodeRun) {
@@ -208,6 +268,23 @@ func (r *ExecutionRunner) Run(
 				"output":       getOptionalString(ne.Output),
 				"started_at":   ne.StartedAt,
 				"completed_at": ne.CompletedAt,
+			})
+			r.emitProgress(ProgressEvent{
+				Kind:        ProgressEventNodeCompleted,
+				ExecutionID: execution.ID,
+				PipelineID:  pipelineID,
+				TriggerType: resolvedSelection.TriggerType,
+				NodeID:      run.NodeID,
+				NodeType:    run.NodeType,
+				Status:      ne.Status,
+				StartedAt:   run.StartedAt,
+				CompletedAt: run.CompletedAt,
+				ErrorMessage: func() string {
+					if ne.Error == nil {
+						return ""
+					}
+					return *ne.Error
+				}(),
 			})
 		},
 	}
@@ -238,6 +315,21 @@ func (r *ExecutionRunner) Run(
 		"status":       status,
 		"error":        getOptionalString(errMsg),
 		"completed_at": completedAt,
+	})
+	r.emitProgress(ProgressEvent{
+		Kind:        ProgressEventExecutionCompleted,
+		ExecutionID: execution.ID,
+		PipelineID:  pipelineID,
+		TriggerType: resolvedSelection.TriggerType,
+		Status:      status,
+		StartedAt:   execution.StartedAt,
+		CompletedAt: completedAt,
+		ErrorMessage: func() string {
+			if errMsg == nil {
+				return ""
+			}
+			return *errMsg
+		}(),
 	})
 
 	result := &ExecutionRunResult{
@@ -300,6 +392,21 @@ func (r *ExecutionRunner) broadcast(channel string, payload map[string]any) {
 	}
 
 	r.broadcaster.Broadcast(channel, payload)
+}
+
+func (r *ExecutionRunner) emitProgress(event ProgressEvent) {
+	if r == nil {
+		return
+	}
+
+	r.progressMu.RLock()
+	cb := r.progressCallback
+	r.progressMu.RUnlock()
+	if cb == nil {
+		return
+	}
+
+	cb(event)
 }
 
 type trackedExecution struct {

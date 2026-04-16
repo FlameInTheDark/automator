@@ -246,7 +246,9 @@ func (s *ChannelContactStore) ListByChannel(ctx context.Context, channelID strin
 	if err != nil {
 		return nil, fmt.Errorf("query channel contacts: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var contacts []models.ChannelContact
 	for rows.Next() {
