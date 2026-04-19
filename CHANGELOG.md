@@ -1,3 +1,17 @@
+# [1.11.0](https://github.com/FlameInTheDark/emerald/compare/v1.10.0...v1.11.0) (2026-04-19)
+
+
+### Bug Fixes
+
+* lint issues fix ([52d1b50](https://github.com/FlameInTheDark/emerald/commit/52d1b509cccd2274c4d241714a684fc90525c294))
+* skills bundling ([e1edfdd](https://github.com/FlameInTheDark/emerald/commit/e1edfdd560134bd2f44c540ddfaec9022e4810ae))
+* test fix ([0ec3a24](https://github.com/FlameInTheDark/emerald/commit/0ec3a24aa6f96a2d98e117a3baa5182a1d9334b1))
+
+
+### Features
+
+* Agentic coding capabilities. ([805a78f](https://github.com/FlameInTheDark/emerald/commit/805a78f443813b2df628ac8dd37775944fb00c41))
+
 # [1.10.0](https://github.com/FlameInTheDark/emerald/compare/v1.9.0...v1.10.0) (2026-04-18)
 
 
